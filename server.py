@@ -271,7 +271,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             return
         routes = {"/": "welcome.html", "/eaglecraft": "index.html",
-                  "/dashboard": "dashboard.html", "/play": "play.html"}
+                  "/dashboard": "dashboard.html", "/play": "play.html",
+                  "/games": "games-hub.html"}
         if path in routes:
             full = os.path.join(WEB, routes[path])
         else:
@@ -307,18 +308,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     # ---- static files ----------------------------------------------------- #
     def serve_static(self, path):
-        # The games site uses relative asset paths, so it must load under the
-        # /games/ base — redirect the short links to the real entry file.
-        if path in ("/games", "/games/"):
-            self.send_response(302)
-            self.send_header("Location", "/games/Gams.html")
-            self.end_headers()
-            return
         routes = {
             "/": "welcome.html",          # interactive portal (Games / EagleCraft)
             "/eaglecraft": "index.html",  # the EagleCraft login/landing
             "/dashboard": "dashboard.html",
             "/play": "play.html",
+            "/games": "games-hub.html",   # our launcher (games open in about:blank)
         }
         if path in routes:
             return self._send_file(os.path.join(WEB, routes[path]))
@@ -379,6 +374,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     # ---- API GET ---------------------------------------------------------- #
     def api_get(self, path, query):
+        if path == "/api/games":
+            # Public: list the Gams games (self-contained html in games/g/).
+            gdir = os.path.join(WEB, "games", "g")
+            imgdir = os.path.join(WEB, "games", "img")
+            games = []
+            if os.path.isdir(gdir):
+                for fn in sorted(os.listdir(gdir)):
+                    if not fn.endswith(".html"):
+                        continue
+                    base = fn[:-5]
+                    if base in ("about",):
+                        continue
+                    has_img = os.path.isfile(os.path.join(imgdir, base + ".png"))
+                    games.append({
+                        "file": f"/games/g/{fn}",
+                        "name": base,
+                        "img": f"/games/img/{base}.png" if has_img else None,
+                    })
+            return self._json({"games": games})
+
         if path == "/api/me":
             user = self._current_user()
             if not user:

@@ -3,56 +3,60 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>EagleCraft — Play</title>
+<title>Launch EagleCraft</title>
 <link rel="stylesheet" href="/static/style.css">
+<style>
+  .launch {
+    min-height: 100vh; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center; gap: 16px; padding: 30px;
+  }
+  .launch .cube { font-size: 76px; filter: drop-shadow(0 10px 24px #0008); animation: float 3s ease-in-out infinite; }
+  @keyframes float { 50% { transform: translateY(-12px); } }
+  .launch h1 { font-size: 34px; margin: 0; }
+  .launch p { color: var(--muted); max-width: 460px; }
+  .big {
+    font-size: 19px; padding: 16px 34px; border-radius: 12px; margin-top: 6px;
+    box-shadow: 0 14px 36px -10px #57a64a99;
+  }
+</style>
 </head>
 <body>
-<div class="gameframe-wrap" id="wrap">
-  <div class="gamebar">
+<div class="launch">
+  <div class="cube">🟩</div>
+  <h1>EagleCraft</h1>
+  <p>Click to launch the game in a clean window. (Allow pop-ups the first time —
+     this is what makes it run properly instead of a black screen.)</p>
+  <button class="btn big" onclick="launchBlank()">▶ Launch EagleCraft</button>
+  <div class="row" style="margin-top:6px">
     <a class="btn gray small" href="/dashboard">← Dashboard</a>
-    <button class="btn small" onclick="launchBlank()">▶ Pop out (about:blank)</button>
+    <button class="btn gray small" onclick="launchHere()">Open in this tab instead</button>
   </div>
-  <div id="mount" style="width:100%;height:100%"></div>
+  <p id="msg" class="msg"></p>
 </div>
 
 <script>
-// Open the game in a clean about:blank window, detached from this page.
+const CLIENT = location.origin + '/eaglercraft/index.html';
+
+// Launch the client into a fresh about:blank window (top-level context — fixes
+// the black-screen-when-embedded problem).
 function launchBlank() {
-  const win = window.open('about:blank', '_blank');
-  if (!win) { alert('Allow pop-ups for this site, then click again.'); return; }
-  const url = location.origin + '/eaglercraft/index.html';
-  win.document.title = 'EagleCraft';
-  win.document.body.style.margin = '0';
-  win.document.body.style.background = '#000';
-  const f = win.document.createElement('iframe');
-  f.src = url;
-  f.allow = 'fullscreen; autoplay; gamepad; pointer-lock; clipboard-write';
-  f.style.cssText = 'position:fixed;inset:0;border:0;width:100vw;height:100vh;';
-  win.document.body.appendChild(f);
+  const w = window.open('about:blank', '_blank');
+  const msg = document.getElementById('msg');
+  if (!w) { msg.className = 'msg err'; msg.textContent = 'Pop-up blocked — allow pop-ups and click again.'; return; }
+  const d = w.document;
+  d.open();
+  d.write('<!DOCTYPE html><html><head><title>EagleCraft</title>' +
+    '<meta name="viewport" content="width=device-width, initial-scale=1">' +
+    '<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}' +
+    'iframe{position:fixed;inset:0;border:0;width:100vw;height:100vh}</style></head>' +
+    '<body><iframe src="' + CLIENT + '" allow="fullscreen; autoplay; gamepad; ' +
+    'pointer-lock; clipboard-write; microphone; camera"></iframe></body></html>');
+  d.close();
+  msg.className = 'msg ok'; msg.textContent = 'Launched! Check the new window.';
 }
 
-// Load the client inline if installed, otherwise show setup help.
-fetch('/eaglercraft/index.html', { method: 'HEAD' }).then(r => {
-  const mount = document.getElementById('mount');
-  if (r.ok) {
-    const f = document.createElement('iframe');
-    f.src = '/eaglercraft/index.html';
-    f.allow = 'fullscreen; autoplay; gamepad; pointer-lock; clipboard-write';
-    f.style.cssText = 'width:100%;height:100%;border:0;';
-    mount.appendChild(f);
-  } else {
-    mount.innerHTML = `
-      <div class="placeholder">
-        <h2>🟩 Game client not installed</h2>
-        <p>Drop an Eaglercraft offline build at
-           <code>web/eaglercraft/index.html</code> and reload.</p>
-        <p><a class="btn" href="/dashboard">Back to Dashboard</a></p>
-      </div>`;
-  }
-}).catch(() => {
-  document.getElementById('mount').innerHTML =
-    '<div class="placeholder"><h2>Could not check client.</h2></div>';
-});
+// Fallback: replace this tab with the client as a top-level page.
+function launchHere() { location.href = CLIENT; }
 </script>
 </body>
 </html>

@@ -16,17 +16,18 @@ let ME = null;
 
 // ---- about:blank launcher (shared) ---------------------------------------
 function launchBlank() {
-  const win = window.open('about:blank', '_blank');
-  if (!win) { alert('Allow pop-ups for this site, then click Launch again.'); return; }
+  const w = window.open('about:blank', '_blank');
+  if (!w) { alert('Allow pop-ups for this site, then click Launch again.'); return; }
   const url = location.origin + '/eaglercraft/index.html';
-  win.document.title = 'EagleCraft';
-  win.document.body.style.margin = '0';
-  win.document.body.style.background = '#000';
-  const f = win.document.createElement('iframe');
-  f.src = url;
-  f.allow = 'fullscreen; autoplay; gamepad; pointer-lock; clipboard-write';
-  f.style.cssText = 'position:fixed;inset:0;border:0;width:100vw;height:100vh;';
-  win.document.body.appendChild(f);
+  const d = w.document;
+  d.open();
+  d.write('<!DOCTYPE html><html><head><title>EagleCraft</title>' +
+    '<meta name="viewport" content="width=device-width, initial-scale=1">' +
+    '<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}' +
+    'iframe{position:fixed;inset:0;border:0;width:100vw;height:100vh}</style></head>' +
+    '<body><iframe src="' + url + '" allow="fullscreen; autoplay; gamepad; ' +
+    'pointer-lock; clipboard-write; microphone; camera"></iframe></body></html>');
+  d.close();
 }
 
 // ---- worlds + storage ----------------------------------------------------
