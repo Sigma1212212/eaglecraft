@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EagleCraft — Dashboard</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="topbar">
+  <div class="logo"><span class="cube">🟩</span> EagleCraft</div>
+  <div class="spacer"></div>
+  <span class="who" id="who"></span>
+  <button class="btn small" onclick="launchBlank()">▶ Launch Game</button>
+  <button class="btn gray small" onclick="logout()">Log out</button>
+</div>
+
+<div class="wrap">
+  <div class="card">
+    <h2>Play</h2>
+    <p class="sub">Launch EagleCraft in a clean <code>about:blank</code> window so it
+      runs detached from the page. (Allow pop-ups the first time.)</p>
+    <div class="row">
+      <button class="btn" onclick="launchBlank()">▶ Launch in about:blank</button>
+      <a class="btn gray" href="/play">Open in this tab</a>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <!-- WORLDS -->
+    <div class="card">
+      <h2>Your Worlds</h2>
+      <p class="sub">Worlds saved to your account. Download one, then import it in
+        Singleplayer. Export a world from the game and upload it here to sync it.</p>
+
+      <div style="background:var(--panel-2);border:1px solid var(--line);border-radius:8px;height:14px;overflow:hidden;margin-bottom:6px">
+        <div id="quota-bar" style="height:100%;width:0;background:var(--green);transition:width .3s"></div>
+      </div>
+      <div class="meta" id="quota-text" style="margin-bottom:14px">…</div>
+
+      <div class="list" id="worlds"><div class="empty">Loading…</div></div>
+      <div style="height:14px"></div>
+      <div class="row">
+        <input type="text" id="world-name" placeholder="World name" style="flex:1">
+        <input type="file" id="world-file" accept=".epk,.zip,.bin" style="display:none" onchange="uploadWorld()">
+        <button class="btn small" onclick="document.getElementById('world-file').click()">⬆ Upload world (.epk)</button>
+      </div>
+      <div class="msg" id="world-msg"></div>
+      <div class="note">In the game: <b>Singleplayer → Edit → Export</b> to get an
+        <code>.epk</code>. Upload it here to sync it to your account.</div>
+    </div>
+
+    <!-- MULTIPLAYER -->
+    <div class="card">
+      <h2>Multiplayer</h2>
+
+      <div class="item" style="margin-bottom:14px">
+        <div class="grow">
+          <div class="title">The SMP <span id="smp-status"></span></div>
+          <div class="meta">The one shared persistent world. Port
+            <code id="smp-port">8100</code> · join via its dev tunnel address.</div>
+          <div id="smp-controls" style="margin-top:8px"></div>
+          <div class="msg" id="smp-msg"></div>
+        </div>
+      </div>
+
+      <div id="smp-console" style="display:none">
+        <h2 style="font-size:15px;margin-bottom:6px">Server Console (admin)</h2>
+        <pre id="console-out" style="background:#11141a;border:1px solid var(--line);border-radius:8px;padding:10px;height:150px;overflow:auto;font-size:11px;margin:0 0 8px">…</pre>
+        <div class="row">
+          <input type="text" id="console-cmd" placeholder="e.g. op YourName   ·   setspawn   ·   eco give YourName 1000"
+                 style="flex:1;font-family:monospace" onkeydown="if(event.key==='Enter')sendCmd()">
+          <button class="btn small" onclick="sendCmd()">Send</button>
+        </div>
+        <div class="note" style="margin-top:8px">
+          Set up spawn &amp; shop: <code>op &lt;yourName&gt;</code> then in-game use
+          <code>/setspawn</code>, and place signs — line 1 <code>[Buy]</code> or
+          <code>[Sell]</code>, line 2 amount, line 3 item, line 4 price.
+        </div>
+      </div>
+
+      <h2 style="font-size:16px">LAN Worlds</h2>
+      <p class="sub">Everything other than the SMP is a <b>LAN world</b> someone opens
+        from their own singleplayer — we don't host these.</p>
+      <div class="note">
+        <div><b>Host a LAN:</b> open a singleplayer world → pause → <b>Open to LAN</b>
+          → share the join code with friends.</div>
+        <div style="margin-top:6px"><b>Join a LAN:</b> Multiplayer → <b>Direct Connect</b>
+          / paste the code your friend shared.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" id="tunnel-card">
+    <h2>Public access (Dev Tunnels)</h2>
+    <p class="sub">Run on the host machine. The login step is interactive — only the
+      person hosting can do it.</p>
+    <div class="note" style="border-color:var(--green)">
+      <div><b>1.</b> Install: <code>curl -sL https://aka.ms/DevTunnelCliInstall | bash</code></div>
+      <div><b>2.</b> Log in: <code>devtunnel user login</code></div>
+      <div><b>3.</b> Website: <code>devtunnel host -p <span id="webport">8080</span> --allow-anonymous</code></div>
+      <div><b>4.</b> The SMP: <code>devtunnel host -p 8100 --allow-anonymous</code></div>
+    </div>
+    <p class="sub" style="margin-top:12px">Pick the nearest cluster to cut latency:
+      <code>devtunnel host -p 8100 -a -c use</code> (<code>use</code>, <code>usw</code>,
+      <code>euw</code>, <code>asse</code>…).</p>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+<script src="/static/dashboard.js"></script>
+</body>
+</html>

@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EagleCraft — Play</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="gameframe-wrap" id="wrap">
+  <div class="gamebar">
+    <a class="btn gray small" href="/dashboard">← Dashboard</a>
+    <button class="btn small" onclick="launchBlank()">▶ Pop out (about:blank)</button>
+  </div>
+  <div id="mount" style="width:100%;height:100%"></div>
+</div>
+
+<script>
+// Open the game in a clean about:blank window, detached from this page.
+function launchBlank() {
+  const win = window.open('about:blank', '_blank');
+  if (!win) { alert('Allow pop-ups for this site, then click again.'); return; }
+  const url = location.origin + '/eaglercraft/index.html';
+  win.document.title = 'EagleCraft';
+  win.document.body.style.margin = '0';
+  win.document.body.style.background = '#000';
+  const f = win.document.createElement('iframe');
+  f.src = url;
+  f.allow = 'fullscreen; autoplay; gamepad; pointer-lock; clipboard-write';
+  f.style.cssText = 'position:fixed;inset:0;border:0;width:100vw;height:100vh;';
+  win.document.body.appendChild(f);
+}
+
+// Load the client inline if installed, otherwise show setup help.
+fetch('/eaglercraft/index.html', { method: 'HEAD' }).then(r => {
+  const mount = document.getElementById('mount');
+  if (r.ok) {
+    const f = document.createElement('iframe');
+    f.src = '/eaglercraft/index.html';
+    f.allow = 'fullscreen; autoplay; gamepad; pointer-lock; clipboard-write';
+    f.style.cssText = 'width:100%;height:100%;border:0;';
+    mount.appendChild(f);
+  } else {
+    mount.innerHTML = `
+      <div class="placeholder">
+        <h2>🟩 Game client not installed</h2>
+        <p>Drop an Eaglercraft offline build at
+           <code>web/eaglercraft/index.html</code> and reload.</p>
+        <p><a class="btn" href="/dashboard">Back to Dashboard</a></p>
+      </div>`;
+  }
+}).catch(() => {
+  document.getElementById('mount').innerHTML =
+    '<div class="placeholder"><h2>Could not check client.</h2></div>';
+});
+</script>
+</body>
+</html>

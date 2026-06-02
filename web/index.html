@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EagleCraft — Play in your browser</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="topbar">
+  <div class="logo"><span class="cube">🟩</span> EagleCraft</div>
+  <div class="spacer"></div>
+  <a class="btn gray small" href="/play">Quick Play</a>
+</div>
+
+<div class="hero">
+  <h1>EagleCraft</h1>
+  <p>Play Minecraft right in your browser. Every student gets an account: your
+     worlds sync to you, join the shared SMP, or open your own world to LAN.
+     <br><small style="color:var(--muted)">(The first account created becomes the admin.)</small></p>
+</div>
+
+<div class="wrap">
+  <div class="card auth-box">
+    <div class="tabs">
+      <button id="tab-login" class="active" onclick="showTab('login')">Log In</button>
+      <button id="tab-register" onclick="showTab('register')">Create Account</button>
+    </div>
+
+    <form id="form-login" onsubmit="return doAuth(event,'login')">
+      <label>Username</label>
+      <input type="text" id="login-user" autocomplete="username" required>
+      <label>Password</label>
+      <input type="password" id="login-pass" autocomplete="current-password" required>
+      <div style="height:14px"></div>
+      <button class="btn full" type="submit">Log In &amp; Load My Data</button>
+      <div class="msg" id="login-msg"></div>
+    </form>
+
+    <form id="form-register" style="display:none" onsubmit="return doAuth(event,'register')">
+      <label>Username</label>
+      <input type="text" id="reg-user" autocomplete="username" required>
+      <label>Password</label>
+      <input type="password" id="reg-pass" autocomplete="new-password" required>
+      <div style="height:14px"></div>
+      <button class="btn full" type="submit">Create Account</button>
+      <div class="msg" id="reg-msg"></div>
+    </form>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+<script>
+// If already logged in, skip straight to the dashboard.
+fetch('/api/me').then(r => { if (r.ok) location.href = '/dashboard'; });
+
+function showTab(which) {
+  document.getElementById('tab-login').classList.toggle('active', which==='login');
+  document.getElementById('tab-register').classList.toggle('active', which==='register');
+  document.getElementById('form-login').style.display = which==='login' ? '' : 'none';
+  document.getElementById('form-register').style.display = which==='register' ? '' : 'none';
+}
+
+async function doAuth(e, kind) {
+  e.preventDefault();
+  const user = document.getElementById(kind==='login'?'login-user':'reg-user').value;
+  const pass = document.getElementById(kind==='login'?'login-pass':'reg-pass').value;
+  const msg = document.getElementById(kind==='login'?'login-msg':'reg-msg');
+  msg.className = 'msg'; msg.textContent = 'Working…';
+  const res = await api('/api/'+kind, 'POST', {username:user, password:pass});
+  if (res.ok) { location.href = '/dashboard'; }
+  else { msg.className = 'msg err'; msg.textContent = res.data.error || 'Failed'; }
+  return false;
+}
+</script>
+</body>
+</html>
