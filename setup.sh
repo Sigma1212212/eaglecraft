@@ -87,4 +87,17 @@ else
   echo "     Drop an EaglercraftX 1.8 offline .html there as index.html."
 fi
 
+# --- 7. Games site (Gams-Offline/Gams, ~1.6 GB) ---------------------------
+say "Games site"
+if [ -f "$ROOT/web/games/Gams.html" ]; then
+  echo "  games already present."
+elif command -v git >/dev/null 2>&1; then
+  echo "  cloning Gams-Offline/Gams (large, be patient)…"
+  rm -rf "$ROOT/web/games"
+  git clone --depth 1 https://github.com/Gams-Offline/Gams.git "$ROOT/web/games"
+  rm -rf "$ROOT/web/games/.git"
+else
+  echo "  !! git not found — install git, then re-run to fetch the games."
+fi
+
 say "Done. Boot it with:  bash start.sh"

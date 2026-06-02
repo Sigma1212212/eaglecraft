@@ -16,3 +16,6 @@ __pycache__/
 
 # NOTE: web/eaglercraft/index.html (the game client) IS committed on purpose
 # so the repo is self-contained. smp-config/ and bungee-config/ are committed.
+
+# games are cloned from Gams-Offline/Gams by setup.sh (1.6GB, not committed)
+/web/games/

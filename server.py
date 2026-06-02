@@ -270,7 +270,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_response(405)
             self.end_headers()
             return
-        routes = {"/": "index.html", "/dashboard": "dashboard.html", "/play": "play.html"}
+        routes = {"/": "welcome.html", "/eaglecraft": "index.html",
+                  "/dashboard": "dashboard.html", "/play": "play.html"}
         if path in routes:
             full = os.path.join(WEB, routes[path])
         else:
@@ -306,8 +307,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     # ---- static files ----------------------------------------------------- #
     def serve_static(self, path):
+        # The games site uses relative asset paths, so it must load under the
+        # /games/ base — redirect the short links to the real entry file.
+        if path in ("/games", "/games/"):
+            self.send_response(302)
+            self.send_header("Location", "/games/Gams.html")
+            self.end_headers()
+            return
         routes = {
-            "/": "index.html",
+            "/": "welcome.html",          # interactive portal (Games / EagleCraft)
+            "/eaglecraft": "index.html",  # the EagleCraft login/landing
             "/dashboard": "dashboard.html",
             "/play": "play.html",
         }
@@ -338,6 +347,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ".epk": "application/octet-stream",
         ".map": "application/json",
         ".ico": "image/x-icon",
+        ".jpeg": "image/jpeg",
+        ".webp": "image/webp",
+        ".mjs": "application/javascript; charset=utf-8",
+        ".txt": "text/plain; charset=utf-8",
+        ".xml": "application/xml",
+        # audio / video for the games
+        ".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".wav": "audio/wav",
+        ".m4a": "audio/mp4", ".mp4": "video/mp4", ".webm": "video/webm",
+        # fonts
+        ".woff": "font/woff", ".woff2": "font/woff2",
+        ".ttf": "font/ttf", ".otf": "font/otf", ".eot": "application/vnd.ms-fontobject",
+        # misc game/data blobs
+        ".data": "application/octet-stream", ".mem": "application/octet-stream",
+        ".unityweb": "application/octet-stream", ".pck": "application/octet-stream",
+        ".br": "application/octet-stream", ".gz": "application/octet-stream",
     }
 
     def _send_file(self, full):

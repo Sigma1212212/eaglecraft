@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Welcome</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #05070d; color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    perspective: 1200px;
+  }
+  /* animated canvas sits behind everything */
+  #bg { position: fixed; inset: 0; z-index: 0; }
+  .glow {
+    position: fixed; inset: 0; z-index: 1; pointer-events: none;
+    background:
+      radial-gradient(60vmax 60vmax at 22% 28%, #1b3a6b55, transparent 60%),
+      radial-gradient(55vmax 55vmax at 80% 75%, #2e6b3a55, transparent 60%);
+    animation: drift 16s ease-in-out infinite alternate;
+  }
+  @keyframes drift { from { transform: translate(-3%, -2%); } to { transform: translate(3%, 2%); } }
+
+  .wrap {
+    position: relative; z-index: 2; width: 100%; max-width: 1000px; padding: 24px;
+    text-align: center;
+  }
+  .title {
+    font-size: clamp(34px, 7vw, 68px); font-weight: 900; letter-spacing: 1px;
+    background: linear-gradient(90deg, #7fd0ff, #9cffb0, #7fd0ff);
+    background-size: 200% auto; -webkit-background-clip: text; background-clip: text;
+    color: transparent; animation: shine 6s linear infinite, pop .8s cubic-bezier(.2,1.2,.3,1);
+  }
+  @keyframes shine { to { background-position: 200% center; } }
+  @keyframes pop { from { opacity: 0; transform: translateY(18px) scale(.96); } }
+  .subtitle {
+    margin: 12px 0 38px; font-size: clamp(15px, 2.4vw, 19px); color: #aeb8c8;
+    animation: pop 1s .1s both;
+  }
+
+  .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 26px; }
+  @media (max-width: 720px) { .cards { grid-template-columns: 1fr; } }
+
+  .card {
+    position: relative; cursor: pointer; border-radius: 22px; padding: 40px 28px;
+    background: linear-gradient(160deg, #161c27, #0e131c);
+    border: 1px solid #2a3344; overflow: hidden;
+    transform-style: preserve-3d; transition: transform .15s ease, box-shadow .3s ease, border-color .3s;
+    animation: pop 1s .2s both; text-decoration: none; color: inherit;
+  }
+  .card:nth-child(2) { animation-delay: .32s; }
+  .card::before {
+    content: ""; position: absolute; inset: -2px; border-radius: 22px; padding: 2px;
+    background: linear-gradient(130deg, var(--c1), var(--c2));
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor; mask-composite: exclude;
+    opacity: 0; transition: opacity .3s;
+  }
+  .card:hover { box-shadow: 0 30px 70px -20px var(--shadow); border-color: transparent; }
+  .card:hover::before { opacity: 1; }
+  .card .icon { font-size: 76px; line-height: 1; filter: drop-shadow(0 8px 18px #0008);
+    transform: translateZ(40px); transition: transform .3s; }
+  .card:hover .icon { transform: translateZ(60px) scale(1.08) rotate(-4deg); }
+  .card h2 { margin: 18px 0 8px; font-size: 26px; transform: translateZ(30px); }
+  .card p  { color: #9aa6b8; font-size: 15px; transform: translateZ(20px); }
+  .card .go {
+    display: inline-block; margin-top: 22px; padding: 11px 22px; border-radius: 999px;
+    font-weight: 700; font-size: 15px; transform: translateZ(30px);
+    background: linear-gradient(120deg, var(--c1), var(--c2)); color: #06121a;
+    transition: transform .2s; box-shadow: 0 8px 24px -8px var(--shadow);
+  }
+  .card:hover .go { transform: translateZ(40px) scale(1.05); }
+
+  .games   { --c1: #ffb86b; --c2: #ff6bcb; --shadow: #ff6bcb66; }
+  .eagler  { --c1: #7fd0ff; --c2: #9cffb0; --shadow: #57a64a66; }
+
+  .foot { margin-top: 34px; font-size: 12.5px; color: #5e6b80; animation: pop 1s .5s both; }
+  .ripple { position: absolute; border-radius: 50%; transform: translate(-50%,-50%) scale(0);
+    background: #ffffff55; pointer-events: none; animation: rip .6s ease-out forwards; }
+  @keyframes rip { to { transform: translate(-50%,-50%) scale(18); opacity: 0; } }
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+<div class="glow"></div>
+
+<div class="wrap">
+  <div class="title">Welcome</div>
+  <div class="subtitle">Where do you want to go? Pick one.</div>
+
+  <div class="cards">
+    <a class="card games" href="/games" data-tilt>
+      <div class="icon">🎮</div>
+      <h2>Games</h2>
+      <p>Jump into the arcade — a whole collection of browser games.</p>
+      <span class="go">Take me to Games →</span>
+    </a>
+
+    <a class="card eagler" href="/eaglecraft" data-tilt>
+      <div class="icon">🟩</div>
+      <h2>Online EagleCraft</h2>
+      <p>Log in, load your worlds, and join the SMP — Minecraft in your browser.</p>
+      <span class="go">Take me to EagleCraft →</span>
+    </a>
+  </div>
+
+  <div class="foot">Tip: you can always come back here from either site.</div>
+</div>
+
+<script>
+// --- starfield / particle background ---
+const cv = document.getElementById('bg'), ctx = cv.getContext('2d');
+let W, H, stars = [];
+function resize() {
+  W = cv.width = innerWidth; H = cv.height = innerHeight;
+  stars = Array.from({length: Math.min(140, Math.floor(W*H/12000))}, () => ({
+    x: Math.random()*W, y: Math.random()*H,
+    z: Math.random()*0.8+0.2, r: Math.random()*1.6+0.3,
+    vx: (Math.random()-0.5)*0.25, vy: (Math.random()-0.5)*0.25
+  }));
+}
+addEventListener('resize', resize); resize();
+let mx = 0, my = 0;
+addEventListener('mousemove', e => { mx = (e.clientX/W-0.5); my = (e.clientY/H-0.5); });
+(function loop(){
+  ctx.clearRect(0,0,W,H);
+  for (const s of stars) {
+    s.x += s.vx + mx*s.z*0.6; s.y += s.vy + my*s.z*0.6;
+    if (s.x<0) s.x=W; if (s.x>W) s.x=0; if (s.y<0) s.y=H; if (s.y>H) s.y=0;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, s.r, 0, 7);
+    ctx.fillStyle = `rgba(170,200,255,${s.z*0.8})`;
+    ctx.fill();
+  }
+  requestAnimationFrame(loop);
+})();
+
+// --- 3D tilt on the cards ---
+document.querySelectorAll('[data-tilt]').forEach(card => {
+  card.addEventListener('mousemove', e => {
+    const r = card.getBoundingClientRect();
+    const px = (e.clientX - r.left)/r.width - 0.5;
+    const py = (e.clientY - r.top)/r.height - 0.5;
+    card.style.transform = `rotateY(${px*12}deg) rotateX(${-py*12}deg) translateY(-4px)`;
+  });
+  card.addEventListener('mouseleave', () => { card.style.transform = ''; });
+  // click ripple + slight delay so the animation shows
+  card.addEventListener('click', e => {
+    const href = card.getAttribute('href');
+    e.preventDefault();
+    const rip = document.createElement('span');
+    rip.className = 'ripple';
+    rip.style.left = e.offsetX + 'px'; rip.style.top = e.offsetY + 'px';
+    rip.style.width = rip.style.height = '14px';
+    card.appendChild(rip);
+    setTimeout(() => location.href = href, 320);
+  });
+});
+</script>
+</body>
+</html>
