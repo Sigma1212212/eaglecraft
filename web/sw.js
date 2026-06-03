@@ -1,7 +1,7 @@
 // EagleCraft service worker — caches everything in the browser so the games and
 // EagleCraft keep working offline after the first visit, and all data lives in
 // the browser (never the server). Bump CACHE to force a refresh after updates.
-const CACHE = 'eaglecraft-v2';
+const CACHE = 'eaglecraft-v3';
 
 self.addEventListener('install', e => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil((async () => {
