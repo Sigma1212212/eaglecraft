@@ -19,7 +19,7 @@ async function api(path, method = 'GET', body = null, raw = null, headers = {}) 
 
 async function logout() {
   await api('/api/logout', 'POST');
-  location.href = '/';
+  location.href = '/chooser';
 }
 
 function fmtSize(bytes) {

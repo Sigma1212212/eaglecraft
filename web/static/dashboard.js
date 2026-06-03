@@ -4,7 +4,7 @@ let ME = null;
 
 (async function init() {
   const me = await api('/api/me');
-  if (!me.ok) { location.href = '/'; return; }
+  if (!me.ok) { location.href = '/chooser'; return; }
   ME = me.data;
   document.getElementById('who').textContent =
     'Signed in as ' + ME.username + (ME.is_admin ? ' (admin)' : '');

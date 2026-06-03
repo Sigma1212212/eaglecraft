@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Loading…</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background:
+      radial-gradient(60vmax 50vmax at 20% -10%, #1b3a6b33, transparent 60%),
+      radial-gradient(55vmax 50vmax at 85% 110%, #2e6b3a33, transparent 60%),
+      #05070d;
+    color: #fff; display: flex; align-items: center; justify-content: center; padding: 24px;
+  }
+  .box { width: 100%; max-width: 520px; text-align: center; }
+  .cube { font-size: 64px; filter: drop-shadow(0 10px 24px #0008);
+    animation: float 3s ease-in-out infinite; }
+  @keyframes float { 50% { transform: translateY(-10px); } }
+  h1 { font-size: 30px; margin: 12px 0 6px;
+    background: linear-gradient(90deg,#7fd0ff,#9cffb0); -webkit-background-clip: text;
+    background-clip: text; color: transparent; }
+  p.sub { color: #9aa6b8; font-size: 15px; margin-bottom: 26px; }
+
+  .track { height: 16px; border-radius: 999px; background: #11151f;
+    border: 1px solid #2a3344; overflow: hidden; }
+  .fill { height: 100%; width: 0%; border-radius: 999px;
+    background: linear-gradient(90deg,#4ea1ff,#57a64a); transition: width .25s ease;
+    box-shadow: 0 0 18px #4ea1ff66; }
+  .pct { margin-top: 10px; font-size: 13px; color: #aeb8c8; font-variant-numeric: tabular-nums; }
+  .stat { margin-top: 4px; font-size: 12px; color: #5e6b80; min-height: 16px; }
+
+  .enter {
+    display: none; margin-top: 26px; padding: 15px 36px; font-size: 18px; font-weight: 800;
+    border: 0; border-radius: 12px; cursor: pointer; color: #06121a;
+    background: linear-gradient(120deg,#7fd0ff,#9cffb0); box-shadow: 0 14px 36px -10px #57a64a99;
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes pulse { 50% { transform: scale(1.04); } }
+  .enter:hover { filter: brightness(1.08); }
+  .note { margin-top: 18px; font-size: 12.5px; color: #5e6b80; min-height: 18px; }
+</style>
+</head>
+<body>
+<div class="box">
+  <div class="cube">🟩</div>
+  <h1 id="title">Loading EagleCraft</h1>
+  <p class="sub" id="sub">Saving the site into your browser so it runs fast and works offline.</p>
+
+  <div class="track"><div class="fill" id="fill"></div></div>
+  <div class="pct" id="pct">0%</div>
+  <div class="stat" id="stat">starting…</div>
+
+  <button class="enter" id="enter" onclick="launch()">▶ Enter</button>
+  <div class="note" id="note"></div>
+</div>
+
+<script>
+const fill = document.getElementById('fill');
+const pctEl = document.getElementById('pct');
+const statEl = document.getElementById('stat');
+const enterBtn = document.getElementById('enter');
+const noteEl = document.getElementById('note');
+
+function setPct(p) { p = Math.max(0, Math.min(100, p)); fill.style.width = p + '%'; pctEl.textContent = Math.round(p) + '%'; }
+function setStat(s) { statEl.textContent = s; }
+function note(s) { noteEl.textContent = s; }
+
+// Cache the whole site into the browser (the service worker stores each fetch).
+async function preload() {
+  setPct(1); setStat('contacting server…');
+  let games = [];
+  try { games = (await (await fetch('/api/games')).json()).games || []; } catch (e) {}
+
+  const shell = ['/chooser', '/static/launch.js', '/static/style.css', '/static/app.js',
+                 '/static/dashboard.js', '/games', '/eaglecraft', '/dashboard'];
+  const thumbs = games.filter(g => g.img).map(g => g.img);
+  const small = shell.concat(thumbs);
+
+  let done = 0;
+  setStat('caching site (' + small.length + ' files)…');
+  const queue = small.slice();
+  async function worker() {
+    while (queue.length) {
+      const u = queue.shift();
+      try { await fetch(u); } catch (e) {}
+      done++; setPct(2 + 28 * done / small.length);
+    }
+  }
+  await Promise.all([0,0,0,0,0,0].map(worker));
+
+  // The big one: the EagleCraft client, with real byte-by-byte progress.
+  setStat('loading EagleCraft client…');
+  try {
+    const resp = await fetch('/eaglercraft/index.html');
+    const total = +resp.headers.get('Content-Length') || 18002822;
+    if (resp.body && resp.body.getReader) {
+      const reader = resp.body.getReader();
+      let loaded = 0;
+      for (;;) {
+        const { done: d, value } = await reader.read();
+        if (d) break;
+        loaded += value.length;
+        setPct(30 + 70 * Math.min(1, loaded / total));
+        setStat('loading EagleCraft client… ' + (loaded/1048576).toFixed(1) + ' / ' + (total/1048576).toFixed(1) + ' MB');
+      }
+    } else { await resp.arrayBuffer(); }
+  } catch (e) {}
+
+  setPct(100); setStat('ready — saved to your browser ✓');
+  document.getElementById('title').textContent = 'Ready to play';
+  document.getElementById('sub').textContent = 'The site is now in your browser memory.';
+  enterBtn.style.display = 'inline-block';
+  note('Tip: allow pop-ups so it can open in a clean window.');
+  // Try to open automatically; pop-up blockers usually require the click instead.
+  launch(true);
+}
+
+let win = null, watcher = null;
+function launch(auto) {
+  win = window.open('about:blank', '_blank');
+  if (!win) {
+    if (auto) { note('Click ▶ Enter to launch (pop-up was blocked).'); return; }
+    note('Pop-up blocked — allow pop-ups for this site, then click ▶ Enter again.');
+    return;
+  }
+  const d = win.document;
+  d.open();
+  d.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>EagleCraft</title>' +
+    '<meta name="viewport" content="width=device-width, initial-scale=1">' +
+    '<style>html,body{margin:0;height:100%;background:#05070d;overflow:hidden}' +
+    'iframe{position:fixed;inset:0;border:0;width:100vw;height:100vh}</style></head>' +
+    '<body><iframe src="' + location.origin + '/chooser" allow="fullscreen; autoplay; ' +
+    'gamepad; pointer-lock; clipboard-write; microphone; camera"></iframe></body></html>');
+  d.close();
+  document.getElementById('title').textContent = 'Running in a new window';
+  document.getElementById('sub').textContent = "You don't need this page until you close that window.";
+  note('Closed it? Come back here and press ▶ Enter to relaunch.');
+  enterBtn.textContent = '▶ Relaunch';
+  if (watcher) clearInterval(watcher);
+  watcher = setInterval(() => {
+    if (win && win.closed) {
+      clearInterval(watcher);
+      document.getElementById('title').textContent = 'Welcome back';
+      document.getElementById('sub').textContent = 'Memory reloaded — ready when you are.';
+      note('Press ▶ Relaunch to open it again.');
+    }
+  }, 800);
+}
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+preload();
+</script>
+</body>
+</html>

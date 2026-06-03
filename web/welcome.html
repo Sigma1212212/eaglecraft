@@ -148,17 +148,17 @@ document.querySelectorAll('[data-tilt]').forEach(card => {
     card.style.transform = `rotateY(${px*12}deg) rotateX(${-py*12}deg) translateY(-4px)`;
   });
   card.addEventListener('mouseleave', () => { card.style.transform = ''; });
-  // click ripple, then open the chosen section in an about:blank window.
+  // click ripple, then go to the chosen section. We're already inside the
+  // about:blank window, so navigating here keeps everything cloaked.
   card.addEventListener('click', e => {
     const href = card.getAttribute('href');
-    const title = card.querySelector('h2') ? card.querySelector('h2').textContent : 'Play';
     e.preventDefault();
     const rip = document.createElement('span');
     rip.className = 'ripple';
     rip.style.left = e.offsetX + 'px'; rip.style.top = e.offsetY + 'px';
     rip.style.width = rip.style.height = '14px';
     card.appendChild(rip);
-    setTimeout(() => launchBlank(href, title), 300);
+    setTimeout(() => location.href = href, 300);
   });
 });
 
