@@ -53,10 +53,11 @@
   <div class="pct" id="pct">0%</div>
   <div class="stat" id="stat">starting…</div>
 
-  <button class="enter" id="enter" onclick="enter()">▶ Enter</button>
+  <button class="enter" id="enter" onclick="launchApp()">🚀 Launch into about:blank</button>
   <div class="note" id="note"></div>
 </div>
 
+<script src="/static/launch.js"></script>
 <script>
 const fill = document.getElementById('fill');
 const pctEl = document.getElementById('pct');
@@ -109,16 +110,18 @@ async function preload() {
     } else { await resp.arrayBuffer(); }
   } catch (e) {}
 
-  setPct(100); setStat('ready — saved to your browser ✓');
-  document.getElementById('title').textContent = 'Ready!';
-  document.getElementById('sub').textContent = 'Entering…';
-  // We are already inside the about:blank tab — just go to the chooser. The
-  // address bar stays about:blank (only this iframe navigates).
+  setPct(100); setStat('saved to your browser ✓');
+  document.getElementById('title').textContent = 'Loaded!';
+  document.getElementById('sub').textContent = 'Everything is in your browser. Open it in a clean window:';
   enterBtn.style.display = 'inline-block';
-  setTimeout(enter, 600);
+  note('Allow pop-ups if your browser asks.');
 }
 
-function enter() { location.href = '/chooser'; }
+// Exactly the EagleCraft about:blank logic (from /static/launch.js): open an
+// about:blank window and load the app inside it.
+function launchApp() {
+  launchBlank(location.origin + '/chooser', 'EagleCraft');
+}
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 preload();

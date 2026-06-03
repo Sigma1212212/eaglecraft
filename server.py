@@ -270,7 +270,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_response(405)
             self.end_headers()
             return
-        routes = {"/": "launch.html", "/app": "loader.html", "/chooser": "welcome.html",
+        routes = {"/": "loader.html", "/chooser": "welcome.html",
                   "/eaglecraft": "index.html", "/dashboard": "dashboard.html",
                   "/play": "play.html", "/games": "games-hub.html"}
         if path in routes:
@@ -309,9 +309,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
     # ---- static files ----------------------------------------------------- #
     def serve_static(self, path):
         routes = {
-            "/": "launch.html",           # opens an about:blank tab, hides the real URL
-            "/app": "loader.html",        # runs inside about:blank: caches, then -> chooser
-            "/chooser": "welcome.html",   # the "Where do you want to go?" portal
+            "/": "loader.html",           # progress bar, then a "Launch into about:blank" button
+            "/chooser": "welcome.html",   # the "Where do you want to go?" portal (runs in about:blank)
             "/eaglecraft": "index.html",  # the EagleCraft login/landing
             "/dashboard": "dashboard.html",
             "/play": "play.html",

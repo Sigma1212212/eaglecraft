@@ -1,12 +1,12 @@
 // Shared "launch into about:blank" helper.
 //
-// Opens a clean about:blank window and loads the target (game or EagleCraft)
-// inside a full-window iframe. The iframe is same-origin, so the content keeps
-// using the *browser's* own localStorage / IndexedDB for save data — the server
-// never touches it.
+// Opens a clean about:blank window and loads the target (game / EagleCraft /
+// the chooser) inside a full-window iframe. The address bar stays about:blank.
+// The iframe is same-origin, so content keeps using the browser's own
+// localStorage / IndexedDB — the server never touches save data.
 //
-// Key detail: an about:blank document has no base URL, so the iframe src MUST be
-// an absolute URL (with origin), otherwise the content can't load.
+// We build the iframe with the DOM API (more reliable than document.write into
+// a popup) and use an ABSOLUTE url (about:blank has no base url of its own).
 function launchBlank(url, title) {
   const full = /^https?:\/\//.test(url) ? url : location.origin + url;
   let win;
@@ -15,21 +15,26 @@ function launchBlank(url, title) {
     alert('Please allow pop-ups for this site, then click again.');
     return false;
   }
-  const html =
-    '<!DOCTYPE html><html><head><meta charset="utf-8">' +
-    '<title>' + (title || 'Play') + '</title>' +
-    '<meta name="viewport" content="width=device-width, initial-scale=1">' +
-    '<style>html,body{margin:0;padding:0;height:100%;background:#000;overflow:hidden}' +
-    'iframe{position:fixed;inset:0;border:0;width:100vw;height:100vh}</style></head>' +
-    '<body><iframe src="' + full + '" allow="fullscreen; autoplay; gamepad; ' +
-    'pointer-lock; clipboard-write; microphone; camera"></iframe></body></html>';
-  try {
-    win.document.open();
-    win.document.write(html);
-    win.document.close();
-  } catch (e) {
-    // Fallback for browsers that block document.write into the popup.
-    win.location = full;
+
+  function inject() {
+    try {
+      const doc = win.document;
+      doc.title = title || 'Play';
+      if (doc.documentElement) doc.documentElement.style.cssText = 'margin:0;height:100%;background:#000';
+      doc.body.style.cssText = 'margin:0;padding:0;height:100vh;background:#000;overflow:hidden';
+      doc.body.innerHTML = '';
+      const f = doc.createElement('iframe');
+      f.src = full;
+      f.setAttribute('allow', 'fullscreen; autoplay; gamepad; pointer-lock; clipboard-write; microphone; camera');
+      f.style.cssText = 'position:fixed;top:0;left:0;border:0;width:100vw;height:100vh';
+      doc.body.appendChild(f);
+    } catch (e) {
+      // Last resort: navigate the popup straight to the content.
+      try { win.location.href = full; } catch (_) {}
+    }
   }
+
+  if (win.document && win.document.body) inject();
+  else setTimeout(inject, 60);
   return false;
 }
