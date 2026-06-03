@@ -272,7 +272,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         routes = {"/": "loader.html", "/chooser": "welcome.html",
                   "/eaglecraft": "index.html", "/dashboard": "dashboard.html",
-                  "/play": "play.html", "/games": "games-hub.html"}
+                  "/play": "play.html"}
         if path in routes:
             full = os.path.join(WEB, routes[path])
         else:
@@ -308,13 +308,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     # ---- static files ----------------------------------------------------- #
     def serve_static(self, path):
+        # The Gams site uses relative asset paths, so it must load under the
+        # /games/ base — send the short links to its own entry page.
+        if path in ("/games", "/games/"):
+            self.send_response(302)
+            self.send_header("Location", "/games/Gams.html")
+            self.end_headers()
+            return
         routes = {
             "/": "loader.html",           # progress bar, then a "Launch into about:blank" button
             "/chooser": "welcome.html",   # the "Where do you want to go?" portal (runs in about:blank)
             "/eaglecraft": "index.html",  # the EagleCraft login/landing
             "/dashboard": "dashboard.html",
             "/play": "play.html",
-            "/games": "games-hub.html",   # our launcher (games open in about:blank)
         }
         if path in routes:
             return self._send_file(os.path.join(WEB, routes[path]))
@@ -664,8 +670,9 @@ SMP_DIR = os.path.join(DATA, "smp")            # Paper backend
 SMP_JAR = os.path.join(SMP_DIR, "paper.jar")
 BUNGEE_DIR = os.path.join(DATA, "bungee")      # proxy (player-facing)
 BUNGEE_JAR = os.path.join(BUNGEE_DIR, "BungeeCord.jar")
-# RAM for the SMP (8 GB default; the box has ~30 GB). Editable via env.
-SMP_RAM_MB = int(os.environ.get("SMP_RAM_MB", "8192"))
+# RAM for the SMP (16 GB so the server-side render stays smooth for everyone).
+# -Xms stays small and grows up to this ceiling. Editable via SMP_RAM_MB env.
+SMP_RAM_MB = int(os.environ.get("SMP_RAM_MB", "16384"))
 # Paper 1.20.4 needs Java 21. Look for a JRE in this order: $JAVA21_HOME,
 # the repo-local runtime/ dir (created by setup.sh), /config, then PATH.
 def _find_java():
