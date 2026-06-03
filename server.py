@@ -673,19 +673,18 @@ BUNGEE_JAR = os.path.join(BUNGEE_DIR, "BungeeCord.jar")
 # RAM for the SMP (16 GB so the server-side render stays smooth for everyone).
 # -Xms stays small and grows up to this ceiling. Editable via SMP_RAM_MB env.
 SMP_RAM_MB = int(os.environ.get("SMP_RAM_MB", "16384"))
-# Paper 1.20.4 needs Java 21. Look for a JRE in this order: $JAVA21_HOME,
-# the repo-local runtime/ dir (created by setup.sh), /config, then PATH.
-def _find_java():
+
+
+# The Eaglercraft SMP needs TWO Java versions:
+#   * Java 8  for the native Paper 1.8.8 backend (so 1.8 clients render natively,
+#     no ViaVersion translation that breaks chunk rendering).
+#   * Java 21 for the BungeeCord proxy / EaglerXServer (it's compiled for 17+).
+def _find_java(patterns, env_var):
     glob = __import__("glob")
-    if os.environ.get("JAVA21_HOME"):
-        cand = os.path.join(os.environ["JAVA21_HOME"], "bin", "java")
+    if os.environ.get(env_var):
+        cand = os.path.join(os.environ[env_var], "bin", "java")
         if os.path.isfile(cand):
             return cand
-    patterns = [
-        os.path.join(ROOT, "runtime", "jdk-21*"),
-        os.path.join(ROOT, "runtime", "jdk21*"),
-        "/config/jdk-21*",
-    ]
     for pat in patterns:
         for d in sorted(glob.glob(pat)):
             cand = os.path.join(d, "bin", "java")
@@ -694,11 +693,16 @@ def _find_java():
     return None
 
 
-_BUNDLED_JAVA = _find_java()
+_JAVA21 = _find_java([os.path.join(ROOT, "runtime", "jdk-21*"), "/config/jdk-21*"], "JAVA21_HOME")
+_JAVA8 = _find_java([os.path.join(ROOT, "runtime", "jdk8u*"), "/config/jdk8u*"], "JAVA8_HOME")
 
 
-def _java_bin():
-    return _BUNDLED_JAVA or shutil.which("java")
+def _java_bin():            # proxy / general (Java 21)
+    return _JAVA21 or shutil.which("java")
+
+
+def _java8_bin():           # the 1.8.8 backend
+    return _JAVA8 or _java_bin()
 
 
 def is_server_running(sid):
@@ -767,8 +771,9 @@ def start_game_server(sid, port):
     """Start the Paper backend, then the BungeeCord proxy (player-facing)."""
     if is_server_running(sid) and is_server_running(sid + "_proxy"):
         return True, "already running"
-    java = _java_bin()
-    if not java:
+    java8 = _java8_bin()      # native 1.8.8 backend
+    java21 = _java_bin()      # proxy / EaglerXServer
+    if not java8 or not java21:
         return False, "Java is not installed — run setup.sh."
     if not os.path.isfile(SMP_JAR) or not os.path.isfile(BUNGEE_JAR):
         return False, "SMP server not set up yet — run setup.sh."
@@ -776,12 +781,12 @@ def start_game_server(sid, port):
     xms = min(2048, xmx)
     try:
         if not is_server_running(sid) and not _port_listening(25565):
-            _running[sid] = _launch(java, SMP_JAR, SMP_DIR, xms, xmx,
+            _running[sid] = _launch(java8, SMP_JAR, SMP_DIR, xms, xmx,
                                     stdin_pipe=True, aikar=True)
         if not is_server_running(sid + "_proxy") and not _port_listening(SMP_PORT):
             # The proxy is light; cap its heap at 1 GB.
             _running[sid + "_proxy"] = _launch(
-                java, BUNGEE_JAR, BUNGEE_DIR, 256, 1024, extra_args=())
+                java21, BUNGEE_JAR, BUNGEE_DIR, 256, 1024, extra_args=())
     except OSError as e:
         return False, f"failed to launch: {e}"
     return True, (f"SMP starting — backend {xmx} MB RAM, proxy on port {port}. "
