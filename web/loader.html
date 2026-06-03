@@ -53,7 +53,7 @@
   <div class="pct" id="pct">0%</div>
   <div class="stat" id="stat">starting…</div>
 
-  <button class="enter" id="enter" onclick="launch()">▶ Enter</button>
+  <button class="enter" id="enter" onclick="enter()">▶ Enter</button>
   <div class="note" id="note"></div>
 </div>
 
@@ -110,45 +110,15 @@ async function preload() {
   } catch (e) {}
 
   setPct(100); setStat('ready — saved to your browser ✓');
-  document.getElementById('title').textContent = 'Ready to play';
-  document.getElementById('sub').textContent = 'The site is now in your browser memory.';
+  document.getElementById('title').textContent = 'Ready!';
+  document.getElementById('sub').textContent = 'Entering…';
+  // We are already inside the about:blank tab — just go to the chooser. The
+  // address bar stays about:blank (only this iframe navigates).
   enterBtn.style.display = 'inline-block';
-  note('Tip: allow pop-ups so it can open in a clean window.');
-  // Try to open automatically; pop-up blockers usually require the click instead.
-  launch(true);
+  setTimeout(enter, 600);
 }
 
-let win = null, watcher = null;
-function launch(auto) {
-  win = window.open('about:blank', '_blank');
-  if (!win) {
-    if (auto) { note('Click ▶ Enter to launch (pop-up was blocked).'); return; }
-    note('Pop-up blocked — allow pop-ups for this site, then click ▶ Enter again.');
-    return;
-  }
-  const d = win.document;
-  d.open();
-  d.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>EagleCraft</title>' +
-    '<meta name="viewport" content="width=device-width, initial-scale=1">' +
-    '<style>html,body{margin:0;height:100%;background:#05070d;overflow:hidden}' +
-    'iframe{position:fixed;inset:0;border:0;width:100vw;height:100vh}</style></head>' +
-    '<body><iframe src="' + location.origin + '/chooser" allow="fullscreen; autoplay; ' +
-    'gamepad; pointer-lock; clipboard-write; microphone; camera"></iframe></body></html>');
-  d.close();
-  document.getElementById('title').textContent = 'Running in a new window';
-  document.getElementById('sub').textContent = "You don't need this page until you close that window.";
-  note('Closed it? Come back here and press ▶ Enter to relaunch.');
-  enterBtn.textContent = '▶ Relaunch';
-  if (watcher) clearInterval(watcher);
-  watcher = setInterval(() => {
-    if (win && win.closed) {
-      clearInterval(watcher);
-      document.getElementById('title').textContent = 'Welcome back';
-      document.getElementById('sub').textContent = 'Memory reloaded — ready when you are.';
-      note('Press ▶ Relaunch to open it again.');
-    }
-  }, 800);
-}
+function enter() { location.href = '/chooser'; }
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 preload();
