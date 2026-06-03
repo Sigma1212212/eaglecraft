@@ -725,9 +725,24 @@ def _java_available():
     return _java_bin() is not None
 
 
-def _launch(java, jar, cwd, xms, xmx, extra_args=("nogui",), stdin_pipe=False):
+# Aikar's flags — the standard Minecraft G1GC tuning that removes the GC pauses
+# that cause "lag spikes". Tuned for a large (>=12 GB) heap.
+AIKAR_FLAGS = [
+    "-XX:+UseG1GC", "-XX:+ParallelRefProcEnabled", "-XX:MaxGCPauseMillis=200",
+    "-XX:+UnlockExperimentalVMOptions", "-XX:+DisableExplicitGC", "-XX:+AlwaysPreTouch",
+    "-XX:G1NewSizePercent=40", "-XX:G1MaxNewSizePercent=50", "-XX:G1HeapRegionSize=16M",
+    "-XX:G1ReservePercent=15", "-XX:G1HeapWastePercent=5", "-XX:G1MixedGCCountTarget=4",
+    "-XX:InitiatingHeapOccupancyPercent=20", "-XX:G1MixedGCLiveThresholdPercent=90",
+    "-XX:G1RSetUpdatingPauseTimePercent=5", "-XX:SurvivorRatio=32",
+    "-XX:+PerfDisableSharedMem", "-XX:MaxTenuringThreshold=1",
+    "-Dusing.aikars.flags=https://mcflags.emc.gs", "-Daikars.new.flags=true",
+]
+
+
+def _launch(java, jar, cwd, xms, xmx, extra_args=("nogui",), stdin_pipe=False, aikar=False):
+    gc = AIKAR_FLAGS if aikar else ["-XX:+UseG1GC"]
     return subprocess.Popen(
-        [java, f"-Xms{xms}M", f"-Xmx{xmx}M", "-XX:+UseG1GC", "-jar", jar, *extra_args],
+        [java, f"-Xms{xms}M", f"-Xmx{xmx}M", *gc, "-jar", jar, *extra_args],
         cwd=cwd,
         stdin=subprocess.PIPE if stdin_pipe else subprocess.DEVNULL,
         stdout=open(os.path.join(cwd, "console.log"), "ab"),
@@ -761,7 +776,8 @@ def start_game_server(sid, port):
     xms = min(2048, xmx)
     try:
         if not is_server_running(sid) and not _port_listening(25565):
-            _running[sid] = _launch(java, SMP_JAR, SMP_DIR, xms, xmx, stdin_pipe=True)
+            _running[sid] = _launch(java, SMP_JAR, SMP_DIR, xms, xmx,
+                                    stdin_pipe=True, aikar=True)
         if not is_server_running(sid + "_proxy") and not _port_listening(SMP_PORT):
             # The proxy is light; cap its heap at 1 GB.
             _running[sid + "_proxy"] = _launch(
