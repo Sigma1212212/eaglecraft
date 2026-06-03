@@ -93,4 +93,17 @@ else
   echo "  !! git not found — install git, then re-run to fetch the games."
 fi
 
+# --- 8. More Games (BinBashBanana/gfiles, ~253 MB) ------------------------
+say "More Games"
+if [ -f "$ROOT/web/moregames/index.html" ]; then
+  echo "  more games already present."
+elif command -v git >/dev/null 2>&1; then
+  echo "  cloning BinBashBanana/gfiles…"
+  rm -rf "$ROOT/web/moregames"
+  git clone --depth 1 https://github.com/BinBashBanana/gfiles.git "$ROOT/web/moregames"
+  rm -rf "$ROOT/web/moregames/.git"
+else
+  echo "  !! git not found — install git, then re-run to fetch more games."
+fi
+
 say "Done. Boot it with:  bash start.sh"

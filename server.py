@@ -308,11 +308,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     # ---- static files ----------------------------------------------------- #
     def serve_static(self, path):
-        # The Gams site uses relative asset paths, so it must load under the
-        # /games/ base — send the short links to its own entry page.
+        # Game collections use relative asset paths, so they must load under
+        # their own base dir — send the short links to the entry page.
         if path in ("/games", "/games/"):
             self.send_response(302)
             self.send_header("Location", "/games/Gams.html")
+            self.end_headers()
+            return
+        if path in ("/moregames", "/moregames/"):
+            self.send_response(302)
+            self.send_header("Location", "/moregames/index.html")
             self.end_headers()
             return
         routes = {

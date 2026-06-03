@@ -19,3 +19,6 @@ __pycache__/
 
 # games are cloned from Gams-Offline/Gams by setup.sh (1.6GB, not committed)
 /web/games/
+
+# "More Games" cloned from BinBashBanana/gfiles by setup.sh (253MB, not committed)
+/web/moregames/
