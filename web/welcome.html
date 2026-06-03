@@ -110,6 +110,7 @@
   <div class="foot">Tip: you can always come back here from either site.</div>
 </div>
 
+<script src="/static/launch.js"></script>
 <script>
 // --- starfield / particle background ---
 const cv = document.getElementById('bg'), ctx = cv.getContext('2d');
@@ -147,18 +148,25 @@ document.querySelectorAll('[data-tilt]').forEach(card => {
     card.style.transform = `rotateY(${px*12}deg) rotateX(${-py*12}deg) translateY(-4px)`;
   });
   card.addEventListener('mouseleave', () => { card.style.transform = ''; });
-  // click ripple + slight delay so the animation shows
+  // click ripple, then open the chosen section in an about:blank window.
   card.addEventListener('click', e => {
     const href = card.getAttribute('href');
+    const title = card.querySelector('h2') ? card.querySelector('h2').textContent : 'Play';
     e.preventDefault();
     const rip = document.createElement('span');
     rip.className = 'ripple';
     rip.style.left = e.offsetX + 'px'; rip.style.top = e.offsetY + 'px';
     rip.style.width = rip.style.height = '14px';
     card.appendChild(rip);
-    setTimeout(() => location.href = href, 320);
+    setTimeout(() => launchBlank(href, title), 300);
   });
 });
+
+// Register the service worker so games + EagleCraft work offline after first
+// load and keep all data in the browser.
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
 </script>
 </body>
 </html>

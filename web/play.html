@@ -26,7 +26,7 @@
   <h1>EagleCraft</h1>
   <p>Click to launch the game in a clean window. (Allow pop-ups the first time —
      this is what makes it run properly instead of a black screen.)</p>
-  <button class="btn big" onclick="launchBlank()">▶ Launch EagleCraft</button>
+  <button class="btn big" onclick="launchGame()">▶ Launch EagleCraft</button>
   <div class="row" style="margin-top:6px">
     <a class="btn gray small" href="/dashboard">← Dashboard</a>
     <button class="btn gray small" onclick="launchHere()">Open in this tab instead</button>
@@ -34,25 +34,16 @@
   <p id="msg" class="msg"></p>
 </div>
 
+<script src="/static/launch.js"></script>
 <script>
 const CLIENT = location.origin + '/eaglercraft/index.html';
 
-// Launch the client into a fresh about:blank window (top-level context — fixes
-// the black-screen-when-embedded problem).
-function launchBlank() {
-  const w = window.open('about:blank', '_blank');
+function launchGame() {
   const msg = document.getElementById('msg');
-  if (!w) { msg.className = 'msg err'; msg.textContent = 'Pop-up blocked — allow pop-ups and click again.'; return; }
-  const d = w.document;
-  d.open();
-  d.write('<!DOCTYPE html><html><head><title>EagleCraft</title>' +
-    '<meta name="viewport" content="width=device-width, initial-scale=1">' +
-    '<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}' +
-    'iframe{position:fixed;inset:0;border:0;width:100vw;height:100vh}</style></head>' +
-    '<body><iframe src="' + CLIENT + '" allow="fullscreen; autoplay; gamepad; ' +
-    'pointer-lock; clipboard-write; microphone; camera"></iframe></body></html>');
-  d.close();
-  msg.className = 'msg ok'; msg.textContent = 'Launched! Check the new window.';
+  const ok = launchBlank(CLIENT, 'EagleCraft');
+  if (ok !== false) { /* launchBlank returns false on success path too */ }
+  msg.className = 'msg ok';
+  msg.textContent = 'Launching in a new window — if nothing opened, allow pop-ups.';
 }
 
 // Fallback: replace this tab with the client as a top-level page.

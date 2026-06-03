@@ -15,19 +15,9 @@ let ME = null;
 })();
 
 // ---- about:blank launcher (shared) ---------------------------------------
-function launchBlank() {
-  const w = window.open('about:blank', '_blank');
-  if (!w) { alert('Allow pop-ups for this site, then click Launch again.'); return; }
-  const url = location.origin + '/eaglercraft/index.html';
-  const d = w.document;
-  d.open();
-  d.write('<!DOCTYPE html><html><head><title>EagleCraft</title>' +
-    '<meta name="viewport" content="width=device-width, initial-scale=1">' +
-    '<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}' +
-    'iframe{position:fixed;inset:0;border:0;width:100vw;height:100vh}</style></head>' +
-    '<body><iframe src="' + url + '" allow="fullscreen; autoplay; gamepad; ' +
-    'pointer-lock; clipboard-write; microphone; camera"></iframe></body></html>');
-  d.close();
+// EagleCraft launch helper (uses the shared launchBlank from /static/launch.js).
+function launchEagler() {
+  return launchBlank(location.origin + '/eaglercraft/index.html', 'EagleCraft');
 }
 
 // ---- worlds + storage ----------------------------------------------------
@@ -85,6 +75,32 @@ async function delWorld(id) {
   loadWorlds();
 }
 
+// Derive the SMP's public join address from how THIS page is being reached, so
+// it always matches the current tunnel and updates itself if the tunnel changes.
+//   dev tunnel:  https://<id>-8080.<cluster>.devtunnels.ms  ->  wss://<id>-25577...
+//   local/IP:    http://host:8080                            ->  ws://host:25577
+function smpAddress(port) {
+  const h = location.hostname;
+  if (/\.devtunnels\.ms$/i.test(h) && /-\d+\./.test(h)) {
+    return 'wss://' + h.replace(/-\d+\./, '-' + port + '.');
+  }
+  const scheme = location.protocol === 'https:' ? 'wss://' : 'ws://';
+  return scheme + h + ':' + port;
+}
+
+function copyAddr() {
+  const addr = document.getElementById('smp-addr').textContent;
+  const done = () => {
+    const b = document.getElementById('smp-copy');
+    b.textContent = '✓ Copied'; setTimeout(() => b.textContent = '📋 Copy', 1500);
+  };
+  if (navigator.clipboard) navigator.clipboard.writeText(addr).then(done, done);
+  else {
+    const t = document.createElement('textarea'); t.value = addr; document.body.appendChild(t);
+    t.select(); try { document.execCommand('copy'); } catch (e) {} t.remove(); done();
+  }
+}
+
 // ---- the SMP -------------------------------------------------------------
 async function loadSmp() {
   const res = await api('/api/smp');
@@ -92,7 +108,7 @@ async function loadSmp() {
   const s = res.data;
   document.getElementById('smp-status').innerHTML =
     `<span class="pill ${s.running ? 'on' : 'off'}">${s.running ? 'online' : 'offline'}</span>`;
-  document.getElementById('smp-port').textContent = s.port;
+  document.getElementById('smp-addr').textContent = smpAddress(s.port);
 
   const ctrl = document.getElementById('smp-controls');
   const consoleBox = document.getElementById('smp-console');

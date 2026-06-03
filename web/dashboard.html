@@ -11,7 +11,7 @@
   <div class="logo"><span class="cube">🟩</span> EagleCraft</div>
   <div class="spacer"></div>
   <span class="who" id="who"></span>
-  <button class="btn small" onclick="launchBlank()">▶ Launch Game</button>
+  <button class="btn small" onclick="launchEagler()">▶ Launch Game</button>
   <button class="btn gray small" onclick="logout()">Log out</button>
 </div>
 
@@ -21,7 +21,7 @@
     <p class="sub">Launch EagleCraft in a clean <code>about:blank</code> window so it
       runs detached from the page. (Allow pop-ups the first time.)</p>
     <div class="row">
-      <button class="btn" onclick="launchBlank()">▶ Launch in about:blank</button>
+      <button class="btn" onclick="launchEagler()">▶ Launch in about:blank</button>
       <a class="btn gray" href="/play">Open in this tab</a>
     </div>
   </div>
@@ -57,9 +57,16 @@
       <div class="item" style="margin-bottom:14px">
         <div class="grow">
           <div class="title">The SMP <span id="smp-status"></span></div>
-          <div class="meta">The one shared persistent world. Port
-            <code id="smp-port">8100</code> · join via its dev tunnel address.</div>
-          <div id="smp-controls" style="margin-top:8px"></div>
+          <div class="meta">The one shared persistent world.</div>
+
+          <div class="meta" style="margin-top:8px">Join address — paste into
+            Eaglercraft → Multiplayer → <b>Add Server</b> / Direct Connect:</div>
+          <div class="row" style="margin-top:6px">
+            <code id="smp-addr" style="flex:1;min-width:0;overflow:auto;white-space:nowrap;padding:9px 12px">…</code>
+            <button class="btn small" id="smp-copy" onclick="copyAddr()">📋 Copy</button>
+          </div>
+
+          <div id="smp-controls" style="margin-top:10px"></div>
           <div class="msg" id="smp-msg"></div>
         </div>
       </div>
@@ -108,6 +115,7 @@
 </div>
 
 <script src="/static/app.js"></script>
+<script src="/static/launch.js"></script>
 <script src="/static/dashboard.js"></script>
 </body>
 </html>

@@ -69,6 +69,7 @@
 
 <div class="grid" id="grid"><div class="empty">Loading games…</div></div>
 
+<script src="/static/launch.js"></script>
 <script>
 let GAMES = [];
 
@@ -81,20 +82,8 @@ function pretty(base) {
     .trim();
 }
 
-// Launch ANY game into a clean about:blank window (no matter what).
-function launchBlank(url, title) {
-  const w = window.open('about:blank', '_blank');
-  if (!w) { alert('Allow pop-ups for this site, then click the game again.'); return; }
-  const d = w.document;
-  d.open();
-  d.write('<!DOCTYPE html><html><head><title>' + (title || 'Game') +
-    '</title><meta name="viewport" content="width=device-width, initial-scale=1">' +
-    '<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}' +
-    'iframe{position:fixed;inset:0;border:0;width:100vw;height:100vh}</style></head>' +
-    '<body><iframe src="' + url + '" allow="fullscreen; autoplay; gamepad; ' +
-    'pointer-lock; clipboard-write; microphone; camera"></iframe></body></html>');
-  d.close();
-}
+// launchBlank() comes from /static/launch.js (uses an absolute URL so the
+// about:blank iframe can actually resolve it).
 
 async function load() {
   try {
