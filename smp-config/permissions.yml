@@ -1,0 +1,21 @@
+# Grant the everyday commands to ALL players (no perms plugin needed).
+essentials.tpa: {default: true}
+essentials.tpaccept: {default: true}
+essentials.tpdeny: {default: true}
+essentials.tpahere: {default: true}
+essentials.spawn: {default: true}
+essentials.home: {default: true}
+essentials.sethome: {default: true}
+essentials.sethome.multiple: {default: true}
+essentials.back: {default: true}
+essentials.sell: {default: true}
+essentials.worth: {default: true}
+essentials.balance: {default: true}
+essentials.pay: {default: true}
+essentials.msg: {default: true}
+essentials.afk: {default: true}
+essentials.list: {default: true}
+essentials.help: {default: true}
+random_teleport.rtp: {default: true}
+deluxemenus.open: {default: true}
+deluxemenus.menu.main: {default: true}

@@ -1,0 +1,79 @@
+menu_title: '&a&lEagleCraft Menu'
+open_command:
+  - menu
+  - hub
+register_command: true
+size: 27
+items:
+  spawn:
+    material: BEACON
+    slot: 10
+    priority: 1
+    display_name: '&a&lSpawn'
+    lore:
+      - '&7Teleport to spawn'
+    left_click_commands:
+      - '[player] spawn'
+      - '[close]'
+  rtp:
+    material: ENDER_PEARL
+    slot: 11
+    priority: 1
+    display_name: '&d&lRandom Teleport'
+    lore:
+      - '&7Drop into the wild'
+    left_click_commands:
+      - '[player] rtp'
+      - '[close]'
+  home:
+    material: RED_BED
+    slot: 12
+    priority: 1
+    display_name: '&b&lHome'
+    lore:
+      - '&7Go to your home'
+      - '&7Set one with &f/sethome'
+    left_click_commands:
+      - '[player] home'
+      - '[close]'
+  sethome:
+    material: OAK_DOOR
+    slot: 13
+    priority: 1
+    display_name: '&e&lSet Home'
+    lore:
+      - '&7Set home at your location'
+    left_click_commands:
+      - '[player] sethome'
+      - '[close]'
+  shop:
+    material: EMERALD
+    slot: 14
+    priority: 1
+    display_name: '&2&lSell Hand'
+    lore:
+      - '&7Sell what you are holding'
+    left_click_commands:
+      - '[player] sell hand'
+      - '[close]'
+  balance:
+    material: GOLD_INGOT
+    slot: 15
+    priority: 1
+    display_name: '&6&lBalance'
+    lore:
+      - '&7Check your coins'
+    left_click_commands:
+      - '[player] balance'
+      - '[close]'
+  tpa:
+    material: COMPASS
+    slot: 16
+    priority: 1
+    display_name: '&3&lTeleport to Player'
+    lore:
+      - '&7Use &f/tpa <name>&7 to ask'
+      - '&7and &f/tpaccept&7 to allow'
+    left_click_commands:
+      - '[message] &3Type &f/tpa <player>&3 to request a teleport!'
+      - '[close]'

@@ -66,6 +66,23 @@ dl "https://github.com/ViaVersion/ViaVersion/releases/download/$VIA_VER/ViaVersi
 dl "https://github.com/ViaVersion/ViaBackwards/releases/download/$VIABACK_VER/ViaBackwards-$VIABACK_VER.jar" "$SMP/plugins/ViaBackwards-$VIABACK_VER.jar"
 dl "https://github.com/ViaVersion/ViaRewind/releases/download/$VIAREWIND_VER/ViaRewind-$VIAREWIND_VER.jar"   "$SMP/plugins/ViaRewind-$VIAREWIND_VER.jar"
 
+# Donut-style extras (RTP, /menu GUI) via Modrinth — latest 1.20.4 build.
+UA="EagleCraft/1.0 (setup)"
+modrinth() {  # modrinth <slug> <dest>
+  [ -s "$2" ] && { echo "  exists: $(basename "$2")"; return; }
+  local u
+  u=$(curl -fsSL -A "$UA" "https://api.modrinth.com/v2/project/$1/version" | python3 -c "
+import sys,json
+for v in json.load(sys.stdin):
+    if {'paper','spigot','bukkit','purpur'} & set(v.get('loaders',[])) and '1.20.4' in v.get('game_versions',[]):
+        f=[x for x in v['files'] if x.get('primary')] or v['files']; print(f[0]['url']); break
+" 2>/dev/null)
+  [ -n "$u" ] && curl -fsSL -A "$UA" -o "$2" "$u" && echo "  got $(basename "$2")" || echo "  !! could not fetch $1"
+}
+modrinth placeholderapi  "$SMP/plugins/PlaceholderAPI.jar"   # required by DeluxeMenus
+modrinth deluxemenus     "$SMP/plugins/DeluxeMenus.jar"      # the /menu GUI
+modrinth random_teleport "$SMP/plugins/random_teleport.jar"  # /rtp
+
 # --- 5. Configs (known-good) ----------------------------------------------
 say "Configs"
 cp -n smp-config/server.properties    "$SMP/server.properties"
@@ -73,10 +90,14 @@ cp -n smp-config/spigot.yml           "$SMP/spigot.yml"
 cp -n smp-config/bukkit.yml           "$SMP/bukkit.yml"
 cp -n smp-config/paper-global.yml     "$SMP/config/paper-global.yml"
 cp -n smp-config/eula.txt             "$SMP/eula.txt"
+cp -n smp-config/permissions.yml      "$SMP/permissions.yml"
 mkdir -p "$SMP/plugins/Essentials"
 cp -n smp-config/essentials-config.yml "$SMP/plugins/Essentials/config.yml"
+mkdir -p "$SMP/plugins/DeluxeMenus/gui_menus"
+cp -n smp-config/deluxemenus-config.yml "$SMP/plugins/DeluxeMenus/config.yml"
+cp -n smp-config/deluxemenus-main.yml   "$SMP/plugins/DeluxeMenus/gui_menus/main.yml"
 cp -n bungee-config/config.yml        "$BUNGEE/config.yml"
-echo "  configs in place (eula accepted, bungee/offline/economy preset)."
+echo "  configs in place (eula, bungee/offline/economy, /menu, perms)."
 
 # --- 6. Eaglercraft client -------------------------------------------------
 say "Eaglercraft client"
