@@ -41,8 +41,8 @@
     animation: pop 1s .1s both;
   }
 
-  .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 26px; }
-  @media (max-width: 720px) { .cards { grid-template-columns: 1fr; } }
+  .cards { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 22px; }
+  @media (max-width: 920px) { .cards { grid-template-columns: 1fr; } }
 
   .card {
     position: relative; cursor: pointer; border-radius: 22px; padding: 40px 28px;
@@ -76,6 +76,7 @@
 
   .games   { --c1: #ffb86b; --c2: #ff6bcb; --shadow: #ff6bcb66; }
   .eagler  { --c1: #7fd0ff; --c2: #9cffb0; --shadow: #57a64a66; }
+  .browser { --c1: #a78bfa; --c2: #4ea1ff; --shadow: #4ea1ff66; }
 
   .foot { margin-top: 34px; font-size: 12.5px; color: #5e6b80; animation: pop 1s .5s both; }
   .ripple { position: absolute; border-radius: 50%; transform: translate(-50%,-50%) scale(0);
@@ -105,9 +106,16 @@
       <p>Log in, load your worlds, and join the SMP — Minecraft in your browser.</p>
       <span class="go">Take me to EagleCraft →</span>
     </a>
+
+    <a class="card browser" href="/browser" data-tilt>
+      <div class="icon">🌐</div>
+      <h2>Browser</h2>
+      <p>A fast in-page browser with tabs — surf the web right here.</p>
+      <span class="go">Open the Browser →</span>
+    </a>
   </div>
 
-  <div class="foot">Tip: you can always come back here from either site.</div>
+  <div class="foot">Tip: you can always come back here from any of these.</div>
 </div>
 
 <script src="/static/launch.js"></script>

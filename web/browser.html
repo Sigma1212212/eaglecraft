@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Browser</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #0b0e14; color: #e7ebf0; display: flex; flex-direction: column; height: 100vh;
+  }
+  /* tab strip */
+  .tabs { display: flex; align-items: flex-end; gap: 4px; padding: 6px 8px 0;
+    background: #07090f; overflow-x: auto; }
+  .tab { display: flex; align-items: center; gap: 8px; max-width: 200px; min-width: 120px;
+    padding: 8px 10px; border-radius: 9px 9px 0 0; background: #161c27; cursor: pointer;
+    border: 1px solid #232c3e; border-bottom: none; font-size: 13px; white-space: nowrap; }
+  .tab.active { background: #1c2330; }
+  .tab .t-title { overflow: hidden; text-overflow: ellipsis; flex: 1; }
+  .tab .t-close { opacity: .6; border-radius: 4px; padding: 0 5px; }
+  .tab .t-close:hover { background: #ffffff22; opacity: 1; }
+  .newtab { padding: 8px 12px; cursor: pointer; font-size: 18px; color: #9aa6b8; align-self: center; }
+  .newtab:hover { color: #fff; }
+
+  /* toolbar */
+  .bar { display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+    background: #1c2330; border-bottom: 1px solid #232c3e; }
+  .nav { display: flex; gap: 4px; }
+  .btn { width: 34px; height: 34px; border-radius: 8px; border: 1px solid #2a3344;
+    background: #11151f; color: #cdd6e3; cursor: pointer; font-size: 15px; }
+  .btn:hover { background: #232c3e; } .btn:disabled { opacity: .4; cursor: default; }
+  .addr { flex: 1; display: flex; align-items: center; background: #0b0e14;
+    border: 1px solid #2a3344; border-radius: 999px; padding: 0 6px 0 14px; }
+  .addr:focus-within { border-color: #4ea1ff; }
+  .addr input { flex: 1; background: transparent; border: 0; outline: none; color: #e7ebf0;
+    font-size: 14px; padding: 9px 6px; }
+  .addr .go { background: linear-gradient(120deg,#4ea1ff,#57a64a); color: #06121a;
+    border: 0; border-radius: 999px; padding: 7px 14px; font-weight: 700; cursor: pointer; }
+
+  .views { position: relative; flex: 1; background: #000; }
+  .view { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: none; background:#fff; }
+  .view.active { display: block; }
+
+  /* start page */
+  .start { position: absolute; inset: 0; display: none; flex-direction: column;
+    align-items: center; justify-content: center; gap: 26px;
+    background: radial-gradient(60vmax 40vmax at 50% 0%, #1b3a6b33, transparent), #0b0e14; }
+  .start.active { display: flex; }
+  .start h1 { font-size: 40px; background: linear-gradient(90deg,#7fd0ff,#9cffb0);
+    -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .bigsearch { width: min(560px, 86vw); display: flex; background: #11151f;
+    border: 1px solid #2a3344; border-radius: 999px; padding: 4px 4px 4px 18px; }
+  .bigsearch:focus-within { border-color: #4ea1ff; }
+  .bigsearch input { flex: 1; background: transparent; border: 0; outline: none;
+    color: #fff; font-size: 16px; padding: 12px 8px; }
+  .bigsearch button { background: linear-gradient(120deg,#4ea1ff,#57a64a); color: #06121a;
+    border: 0; border-radius: 999px; padding: 0 22px; font-weight: 800; cursor: pointer; }
+  .quick { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; width: min(620px,90vw); }
+  .quick a { display: flex; flex-direction: column; align-items: center; gap: 6px;
+    width: 96px; padding: 14px 6px; border-radius: 12px; background: #161c27;
+    border: 1px solid #232c3e; text-decoration: none; color: #cdd6e3; font-size: 12px; }
+  .quick a:hover { transform: translateY(-3px); border-color: #4ea1ff; }
+  .quick .ico { font-size: 26px; }
+</style>
+</head>
+<body>
+<div class="tabs" id="tabs"></div>
+<div class="bar">
+  <div class="nav">
+    <button class="btn" id="back"  onclick="go(-1)" title="Back">◀</button>
+    <button class="btn" id="fwd"   onclick="go(1)"  title="Forward">▶</button>
+    <button class="btn" id="reload" onclick="reload()" title="Reload">⟳</button>
+    <button class="btn" id="home"  onclick="home()" title="Home">🏠</button>
+  </div>
+  <form class="addr" onsubmit="return navigate(this.q.value)">
+    <input id="urlbar" name="q" placeholder="Search or type a web address" autocomplete="off" spellcheck="false">
+    <button class="go" type="submit">Go</button>
+  </form>
+</div>
+<div class="views" id="views"></div>
+
+<script>
+// Each tab: { id, title, onStart(bool), el(iframe), startEl(div) }. Display is
+// controlled purely by the .active class (CSS sets display), no inline styles.
+let tabs = [], active = -1, uid = 0;
+const views = document.getElementById('views');
+const tabsEl = document.getElementById('tabs');
+const urlbar = document.getElementById('urlbar');
+
+const QUICK = [
+  { name: 'Games',      url: '/games',                ico: '🎮' },
+  { name: 'EagleCraft', url: '/eaglecraft',           ico: '🟩' },
+  { name: 'Wikipedia',  url: 'https://wikipedia.org', ico: '📚' },
+  { name: 'Example',    url: 'https://example.com',   ico: '🌐' },
+];
+
+function normalize(input) {
+  input = (input || '').trim();
+  if (!input) return null;
+  if (/^[a-z]+:\/\//i.test(input)) return input;
+  if (input.startsWith('/')) return location.origin + input;
+  if (/^[\w-]+(\.[\w-]+)+(\/.*)?$/.test(input)) return 'https://' + input;
+  return 'https://duckduckgo.com/?q=' + encodeURIComponent(input);
+}
+
+function newTab(url) {
+  const frame = document.createElement('iframe');
+  frame.className = 'view';
+  frame.setAttribute('allow', 'fullscreen; autoplay; gamepad; pointer-lock; clipboard-write');
+  const start = document.createElement('div');
+  start.className = 'start';
+  start.innerHTML =
+    '<h1>🌐 Browser</h1>' +
+    '<form class="bigsearch" onsubmit="return navigate(this.q.value)">' +
+    '<input name="q" placeholder="Search the web or enter a URL">' +
+    '<button>Search</button></form>' +
+    '<div class="quick">' + QUICK.map(q =>
+      `<a href="#" onclick="navigate('${q.url}');return false"><span class="ico">${q.ico}</span>${q.name}</a>`
+    ).join('') + '</div>';
+  views.appendChild(start);
+  views.appendChild(frame);
+  const tab = { id: ++uid, title: 'New Tab', onStart: true, el: frame, startEl: start };
+  frame.addEventListener('load', () => {
+    try { tab.title = frame.contentDocument.title || frame.src; } catch (e) { tab.title = 'Page'; }
+    renderTabs();
+    if (tabs[active] === tab) syncBar();
+  });
+  tabs.push(tab);
+  selectTab(tabs.length - 1);
+  if (url) navigate(url);
+}
+
+function selectTab(i) {
+  active = i;
+  tabs.forEach((t, k) => {
+    t.el.classList.toggle('active', k === i && !t.onStart);
+    t.startEl.classList.toggle('active', k === i && t.onStart);
+  });
+  renderTabs(); syncBar();
+}
+
+function closeTab(i, ev) {
+  if (ev) ev.stopPropagation();
+  const t = tabs[i]; if (!t) return;
+  t.el.remove(); t.startEl.remove();
+  tabs.splice(i, 1);
+  if (!tabs.length) return newTab();
+  selectTab(Math.min(i, tabs.length - 1));
+}
+
+function renderTabs() {
+  tabsEl.innerHTML = tabs.map((t, i) =>
+    `<div class="tab ${i===active?'active':''}" onclick="selectTab(${i})">
+       <span class="t-title">${escapeHtml(t.title)}</span>
+       <span class="t-close" onclick="closeTab(${i},event)">✕</span>
+     </div>`).join('') + '<div class="newtab" onclick="newTab()">+</div>';
+}
+
+function navigate(input) {
+  const url = normalize(input);
+  const t = tabs[active];
+  if (!url || !t) return false;
+  t.onStart = false;
+  t.el.src = url;
+  urlbar.value = url;
+  selectTab(active);
+  return false;
+}
+
+function syncBar() {
+  const t = tabs[active];
+  if (!t || t.onStart) { urlbar.value = ''; return; }
+  try { urlbar.value = t.el.contentWindow.location.href; }
+  catch (e) { urlbar.value = t.el.src || ''; }
+}
+
+function go(d) { const t = tabs[active]; if (t && !t.onStart) try { t.el.contentWindow.history.go(d); } catch (e) {} }
+function reload() { const t = tabs[active]; if (t && !t.onStart) t.el.src = t.el.src; }
+function home() { const t = tabs[active]; if (!t) return; t.onStart = true; t.el.src = 'about:blank'; urlbar.value = ''; selectTab(active); }
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+newTab();
+</script>
+</body>
+</html>

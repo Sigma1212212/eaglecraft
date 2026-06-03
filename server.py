@@ -272,7 +272,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         routes = {"/": "loader.html", "/chooser": "welcome.html",
                   "/eaglecraft": "index.html", "/dashboard": "dashboard.html",
-                  "/play": "play.html"}
+                  "/play": "play.html", "/browser": "browser.html"}
         if path in routes:
             full = os.path.join(WEB, routes[path])
         else:
@@ -321,6 +321,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             "/eaglecraft": "index.html",  # the EagleCraft login/landing
             "/dashboard": "dashboard.html",
             "/play": "play.html",
+            "/browser": "browser.html", # the in-page browser
         }
         if path in routes:
             return self._send_file(os.path.join(WEB, routes[path]))
