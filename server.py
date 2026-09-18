@@ -477,12 +477,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     "ready": BACKEND.ready,
                     "uptime": BACKEND.uptime(),
                     "heap_mb": BACKEND.heap_mb,
+                    "unmanaged": unmanaged("paper"),
                 },
                 "proxy": {
                     "running": PROXY.running,
                     "ready": PROXY.ready,
                     "uptime": PROXY.uptime(),
                     "heap_mb": PROXY.heap_mb,
+                    "unmanaged": unmanaged("proxy"),
                 },
                 "players": online_players(),
                 "ram_budget_mb": SMP_RAM_MB,
@@ -1039,6 +1041,29 @@ def smp_online():
     return PROXY.running or _port_listening(SMP_PORT)
 
 
+def unmanaged(which):
+    """True when something is holding our port that we did not start.
+
+    Always a leftover from a previous hard kill. It still serves players, but
+    this panel cannot send it console commands and will not shut it down, so
+    it must be surfaced rather than silently tolerated."""
+    if which == "proxy":
+        return (not PROXY.running) and _port_listening(SMP_PORT)
+    return (not BACKEND.running) and _port_listening(25565)
+
+
+def warn_if_unmanaged():
+    for name, port in (("proxy", SMP_PORT), ("paper", 25565)):
+        if unmanaged(name):
+            proc = PROXY if name == "proxy" else BACKEND
+            proc._emit(
+                f"!! port {port} is held by a process this panel does not own "
+                f"(orphan from an earlier hard kill). Console commands and "
+                f"graceful shutdown will NOT reach it. Stop that process, then "
+                f"restart the panel."
+            )
+
+
 def online_players():
     return sorted(BACKEND.players)
 
@@ -1062,6 +1087,8 @@ def _start_proxy_when_ready():
         time.sleep(0.5)
     if not _port_listening(SMP_PORT):
         PROXY.start()
+    else:
+        warn_if_unmanaged()
 
 
 def start_game_server(sid="smp", port=None):
@@ -1078,11 +1105,14 @@ def start_game_server(sid="smp", port=None):
         return True, "already running"
 
     notes = []
+    warn_if_unmanaged()
     if not BACKEND.running and not _port_listening(25565):
         ok, msg = BACKEND.start()
         notes.append(msg)
         if not ok:
             return False, msg
+    elif unmanaged("paper"):
+        notes.append("WARNING: :25565 held by an unmanaged process (orphan)")
     if not PROXY.running:
         threading.Thread(target=_start_proxy_when_ready,
                          name="proxy-starter", daemon=True).start()
