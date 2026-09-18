@@ -36,7 +36,8 @@ import subprocess
 import shutil
 import threading
 from collections import deque
-from urllib.parse import urlparse, parse_qs
+import posixpath
+from urllib.parse import urlparse, parse_qs, unquote
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 WEB = os.path.join(ROOT, "web")
@@ -190,6 +191,32 @@ def read_session(token):
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_]{3,20}$")
 
 
+def resolve_web_path(url_path):
+    """Map a URL path to a file inside web/, or None if it escapes.
+
+    A URL is not a filesystem path. os.path.normpath() on Windows turns "/"
+    into "\\", and a leading backslash makes os.path.join() drop the base
+    directory, so the old normpath().lstrip("/") approach 403'd every nested
+    asset on Windows while working fine on Linux.
+
+    Here the URL is normalised with POSIX rules, then split into components
+    with "", "." and ".." thrown away, so traversal cannot survive no matter
+    what separator the platform prefers.
+    """
+    decoded = unquote(url_path)
+    if "\x00" in decoded:
+        return None
+    rel = posixpath.normpath(decoded)
+    parts = [p for p in rel.split("/") if p and p not in (".", "..")]
+    full = os.path.abspath(os.path.join(WEB, *parts)) if parts else os.path.abspath(WEB)
+    base = os.path.abspath(WEB)
+    if full != base and not full.startswith(base + os.sep):
+        return None
+    if os.path.isdir(full):
+        full = os.path.join(full, "index.html")
+    return full
+
+
 # --------------------------------------------------------------------------- #
 # HTTP handler
 # --------------------------------------------------------------------------- #
@@ -278,14 +305,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path in routes:
             full = os.path.join(WEB, routes[path])
         else:
-            safe = os.path.normpath(path).lstrip("/")
-            full = os.path.join(WEB, safe)
-            if not os.path.abspath(full).startswith(os.path.abspath(WEB)):
+            full = resolve_web_path(path)
+            if full is None:
                 self.send_response(403)
                 self.end_headers()
                 return
-            if os.path.isdir(full):
-                full = os.path.join(full, "index.html")
         if os.path.isfile(full):
             ext = os.path.splitext(full)[1].lower()
             self.send_response(200)
@@ -333,13 +357,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path in routes:
             return self._send_file(os.path.join(WEB, routes[path]))
 
-        # Prevent path traversal.
-        safe = os.path.normpath(path).lstrip("/")
-        full = os.path.join(WEB, safe)
-        if not os.path.abspath(full).startswith(os.path.abspath(WEB)):
+        # Prevent path traversal (see resolve_web_path).
+        full = resolve_web_path(path)
+        if full is None:
             return self._err("forbidden", 403)
-        if os.path.isdir(full):
-            full = os.path.join(full, "index.html")
         if os.path.isfile(full):
             return self._send_file(full)
         return self._err("not found", 404)
