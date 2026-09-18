@@ -1,0 +1,147 @@
+# ===========================================================================
+#  config/paper-global.yml  --  Paper 1.20.4
+#  This is where the "offload it to the host PC" settings actually live.
+#
+#  On modern Paper, chunk loading/generation/I-O is already asynchronous
+#  (the old `async-chunks: true` flag was removed after 1.16). What you CAN
+#  still control is how many host threads do that work and how fast finished
+#  chunks are pushed down the wire at each client -- which is exactly the
+#  knob that decides whether a Chromebook renders smoothly or freezes.
+# ===========================================================================
+_version: 29
+
+chunk-loading-basic:
+  # -1.0 = unlimited. Generation and loading happen on the host's worker
+  # threads, so let them run flat out; the host has the cores, the Chromebook
+  # doesn't care how fast we generate.
+  player-max-chunk-generate-rate: -1.0
+  player-max-chunk-load-rate: 100.0
+  # ***** THE MOST IMPORTANT LINE IN THIS FILE FOR LOW-END CLIENTS *****
+  # Paper's default is 75 chunks/second per player. Every chunk that lands in
+  # the browser forces a mesh rebuild on the main JS/WASM thread -- 75/s is
+  # what makes Eaglercraft on a Celeron Chromebook stutter, white-screen, or
+  # crash the tab while flying or first joining.
+  # 12/s fills a view-distance-5 world (121 chunks) in about 10 seconds and
+  # leaves the browser's render thread breathing room the whole time.
+  # Raise toward 25 if your clients are newer; drop to 8 for the worst ones.
+  player-max-chunk-send-rate: 12.0
+
+chunk-loading-advanced:
+  # Let Paper shrink the effective send distance automatically when a client
+  # is falling behind, instead of queueing chunks the client cannot consume.
+  auto-config-send-distance: true
+  player-max-concurrent-chunk-generates: 0
+  player-max-concurrent-chunk-loads: 0
+
+chunk-system:
+  # -1 / default = size from available cores. This is the actual "use my PC's
+  # threads for world work" setting.
+  gen-parallelism: default
+  io-threads: -1
+  worker-threads: -1
+
+collisions:
+  enable-player-collisions: false
+  send-full-pos-for-hard-colliding-entities: true
+
+console:
+  enable-brigadier-completions: true
+  enable-brigadier-highlighting: true
+  has-all-permissions: false
+
+item-validation:
+  book-size:
+    page-max: 2560
+    total-multiplier: 0.98
+  book:
+    author: 8192
+    page: 16384
+    title: 8192
+  display-name: 8192
+  lore-line: 8192
+  resolve-selectors-in-books: false
+
+logging:
+  deobfuscate-stacktraces: true
+
+messages:
+  kick:
+    authentication-servers-down: <lang:multiplayer.disconnect.authservers_down>
+    connection-throttle: Connection throttled! Please wait before reconnecting.
+    flying-player: <lang:multiplayer.disconnect.flying>
+    flying-vehicle: <lang:multiplayer.disconnect.flying>
+  no-permission: <red>I'm sorry, but you do not have permission to perform this
+    command.
+  use-display-name-in-quit-message: false
+
+misc:
+  # Browser clients reconnect constantly (tab sleep, wifi hiccups). Spreading
+  # joins over more ticks stops a class of 20 Chromebooks reconnecting at once
+  # from producing a 10-second freeze for everyone already playing.
+  max-joins-per-tick: 3
+  chat-threads:
+    chat-executor-core-size: -1
+    chat-executor-max-size: -1
+  compression-level: default
+  fix-entity-position-desync: true
+  load-permissions-yml-before-plugins: true
+  lag-compensate-block-breaking: true
+  region-file-cache-size: 256
+  strict-advancement-dimension-check: false
+  use-alternative-luck-formula: false
+  use-dimension-type-for-custom-spawners: false
+
+packet-limiter:
+  # A wedged or malicious browser tab can spam packets and take the whole
+  # server's tick with it. This bounds the damage.
+  all-packets:
+    action: KICK
+    interval: 7.0
+    max-packet-rate: 500.0
+  kick-message: <red><lang:disconnect.exceeded_packet_rate>
+  overrides:
+    ServerboundPlaceRecipePacket:
+      action: DROP
+      interval: 4.0
+      max-packet-rate: 5.0
+
+player-auto-save:
+  max-per-tick: -1
+  rate: -1
+
+proxies:
+  bungee-cord:
+    # Player identity comes from BungeeCord/EaglerXServer, not from Mojang.
+    online-mode: false
+  proxy-protocol: false
+  velocity:
+    enabled: false
+    online-mode: false
+    secret: ''
+
+scoreboards:
+  save-empty-scoreboard-teams: false
+  track-plugin-scoreboards: false
+
+spam-limiter:
+  incoming-packet-threshold: 300
+  recipe-spam-increment: 1
+  recipe-spam-limit: 20
+  tab-spam-increment: 1
+  tab-spam-limit: 500
+
+timings:
+  enabled: false
+  url: https://timings.aikar.co/
+
+unsupported-settings:
+  allow-grindstone-overstacking: false
+  allow-headless-pistons: false
+  allow-permanent-block-break-exploits: false
+  allow-piston-duplication: false
+  compression-format: ZLIB
+  perform-username-validation: true
+
+watchdog:
+  early-warning-delay: 10000
+  early-warning-every: 5000

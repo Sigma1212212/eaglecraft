@@ -5,7 +5,8 @@ A self-hosted **browser Minecraft** platform for a class/group:
 - **Accounts** for every student (passwords hashed, sessions signed) — data persists in SQLite
 - **Per-account worlds** — upload your world export, download it on any device (150 MB quota each)
 - **about:blank launcher** — pops the game into a clean window
-- **A real SMP** that renders server-side (Paper + 8 GB RAM) with **economy & shop signs** and **spawn**
+- **A real vanilla SMP** simulated server-side (Paper 1.20.4), tuned so low-end
+  Chromebooks only have to draw — no economy, no shops, no plugins
 - **Admin server console** built into the website
 - **One-command install + boot**, and public hosting via **Microsoft Dev Tunnels**
 
@@ -52,42 +53,76 @@ Players join from inside the game: **Multiplayer → Direct Connect →** the `w
 URL. Architecture (two Java 21 processes, started for you):
 
 ```
-Eaglercraft 1.8 client
-      │  wss
+Eaglercraft 1.8 client  (Chromebook browser canvas)
+      │  ws / wss
       ▼
-BungeeCord  +  EaglerXServer        data/bungee/   (port 25577, player-facing)
-      │  forwards
+BungeeCord + EaglerXServer + ViaVersion/ViaBackwards/ViaRewind
+      │                       data/bungee/   0.0.0.0:25577   (player-facing)
+      │  forwards, already translated to 1.20.4
       ▼
-Paper 1.20.4  +  ViaVersion/Backwards/Rewind  +  EssentialsX   data/smp/  (port 25565)
+Paper 1.20.4            data/smp/      127.0.0.1:25565   (never exposed)
 ```
+
+Both processes run on **Java 21** and are supervised by `server.py`: their
+stdout is drained by a dedicated thread into a ring buffer the dashboard
+streams, and their stdin stays on a pipe so the web console can type commands.
+
+The **Via stack lives on the proxy**, so protocol translation is paid for once
+by your host PC instead of by every Chromebook.
 
 > **Why Paper 1.20.4?** EaglerXServer’s Bukkit module breaks on Paper ≥ 1.20.5
 > (Mojang mappings). Running EaglerXServer on **BungeeCord** + a 1.20.4 backend,
 > with Via to accept 1.8 clients, is the combination that actually works.
 
-### Spawn & shop (admin)
+### Running the server (admin)
 
-Log in as admin → dashboard → **Server Console**:
+Log in as admin → dashboard → **Server Console**. It writes straight to Paper's
+stdin, so every vanilla command works:
 
 1. `op <yourEaglercraftName>`
-2. In-game: stand where spawn should be → `/setspawn`
-3. Build a shop: place a sign —
-   ```
-   [Buy]          [Sell]
-   1              1
-   diamond        cobblestone
-   100            2
-   ```
-   Players start with **500** coins; `[Buy]`/`[Sell]`/`[Trade]` signs and `/sell hand` all work.
+2. In-game: stand where spawn should be → `/setworldspawn`
+3. `whitelist add <name>` / `whitelist on` if you want it closed
+4. `save-all flush` before you shut the PC down
+
+There is no economy, no shop signs and no permissions plugin — operators come
+from vanilla `ops.json` and everything else is plain survival Minecraft.
 
 ---
+
+## Performance: where every setting lives
+
+The clients are browser canvases on weak hardware, so the host absorbs the
+simulation and the wire stays quiet.
+
+| Setting | Value | File |
+|---|---|---|
+| `view-distance` | 5 | `server.properties` + `spigot.yml` |
+| `simulation-distance` | 4 | `server.properties` + `spigot.yml` |
+| `entity-broadcast-range-percentage` | 50 | `server.properties` |
+| `entity-activation-range` | animals 16 / monsters 24 / misc 8 | `spigot.yml` |
+| `entity-tracking-range` | animals 24 / monsters 32 / misc 16 | `spigot.yml` |
+| `max-entity-collisions` | 2 | `spigot.yml` + `config/paper-world-defaults.yml` |
+| `player-max-chunk-send-rate` | 12.0 | `config/paper-global.yml` |
+| `chunk-system` threads | all cores | `config/paper-global.yml` |
+| mob despawn ranges | soft 32 / hard 80 | `config/paper-world-defaults.yml` |
+
+Two corrections worth knowing, because the internet still repeats both:
+
+* **`async-chunks: true` does not exist any more.** It was removed after Paper
+  1.16 — chunk load/gen/IO has been asynchronous ever since. The real controls
+  are `chunk-system` and `chunk-loading-basic` in `paper-global.yml`.
+* **`view-distance`/`simulation-distance` are not Paper keys.** They live in
+  `server.properties` (global) and `spigot.yml` (per world). Putting them in
+  `paper-world-defaults.yml` silently does nothing.
+
+Player-side settings are in [CHROMEBOOK-CLIENT-SETTINGS.md](CHROMEBOOK-CLIENT-SETTINGS.md).
 
 ## Scripts
 
 | Script | What it does |
 |--------|--------------|
-| `setup.sh` | Downloads Java/Paper/Bungee/plugins, installs configs. Re-runnable. |
-| `start.sh` | Boots web server + SMP (`AUTOSTART_SMP=1`) + dev tunnel. |
+| `setup.sh` | Java 21 JRE, Paper 1.20.4 (sha256-verified), BungeeCord, EaglerXServer, Via stack, tuned configs. Re-runnable. |
+| `start.sh` | Loads `.env`, creates DB tables, checks port bindings, boots panel + SMP + dev tunnel. |
 | `stop.sh`  | Stops everything. |
 | `tunnel.sh`| Just the dev tunnel (persistent, anonymous). |
 
@@ -96,19 +131,31 @@ Log in as admin → dashboard → **Server Console**:
 ```
 server.py            web app (stdlib HTTP, SQLite, auth, worlds, SMP control + console)
 web/                 frontend (index, dashboard, play) + eaglercraft/index.html (client)
-smp-config/          known-good Paper/Spigot/Essentials configs (copied in by setup.sh)
+smp-config/          tuned Paper/Spigot/Bukkit configs (copied in by setup.sh)
+  ├ server.properties         view 5, simulation 4, entity broadcast 50%
+  ├ spigot.yml                activation + tracking ranges, collisions
+  ├ bukkit.yml                spawn limits
+  ├ paper-global.yml          chunk send rate, chunk-system threads, limiter
+  └ paper-world-defaults.yml  despawn ranges, collisions, hopper/pathfinding
 bungee-config/       known-good BungeeCord config
 setup.sh start.sh stop.sh tunnel.sh
+.env.example         RAM / port / behaviour knobs
 data/                runtime: SQLite db, worlds, the server + proxy (git-ignored)
 runtime/             the downloaded JRE (git-ignored)
 ```
 
 ## Config knobs
 
+Copy `.env.example` to `.env` — `start.sh` loads it.
+
 - `data/admin.conf` — admin username/password (re-applied on each boot)
-- `SMP_RAM_MB` env — backend heap in MB (default 8192)
-- `PORT` env — website port (default 8080)
-- `JAVA21_HOME` env — use a specific Java 21 instead of the bundled one
+- `SMP_RAM_MB` — budget for the **whole network** (default 4096). The proxy
+  takes `SMP_PROXY_RAM_MB` (default 512) and Paper receives the remainder, so
+  the two heaps can never over-commit the host.
+- `PORT` — website port (default 8080)
+- `SMP_PORT` — proxy/websocket port players connect to (default 25577)
+- `JAVA21_HOME` — use a specific Java 21 instead of the bundled one.
+  Java 17+ is mandatory: Paper 1.20.4 cannot start on Java 8 or 11.
 
 ## Security notes
 

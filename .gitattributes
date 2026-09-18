@@ -1,0 +1,14 @@
+# Keep shell scripts and configs LF so they run on Linux/containers even when
+# the repo is edited on Windows (this machine has core.autocrlf=true, which
+# would otherwise commit CRLF and break every "bash: \r: command not found").
+* text=auto eol=lf
+
+*.sh    text eol=lf
+*.py    text eol=lf
+*.yml   text eol=lf
+*.properties text eol=lf
+
+*.jar   binary
+*.epk   binary
+*.png   binary
+*.woff2 binary

@@ -1,0 +1,213 @@
+# ===========================================================================
+#  config/paper-world-defaults.yml  --  Paper 1.20.4
+#  EagleCraft SMP: tuned so the HOST PC does the work and the Chromebook
+#  browsers receive as few packets and as few entities as possible.
+#
+#  READ THIS FIRST -- two things people expect to find here are NOT here:
+#
+#   * view-distance / simulation-distance
+#       Paper does not own these keys. They live in `server.properties`
+#       (server-wide default) and `spigot.yml` -> world-settings.default
+#       (per-world override). Both are already set to view 5 / simulation 4.
+#
+#   * async-chunks: true
+#       This option was removed after Paper 1.16. From 1.17 onward chunk
+#       loading, generation and I/O are ALWAYS asynchronous -- there is no
+#       switch to flip, and adding one back does nothing. The real knobs are
+#       in paper-global.yml (`chunk-system`, `chunk-loading-basic`,
+#       `chunk-loading-advanced`), which is where the offloading is
+#       configured for this server.
+#
+#  Paper fills in every key you leave out with its default, so this file only
+#  contains what we deliberately changed.
+# ===========================================================================
+_version: 30
+
+chunks:
+  auto-save-interval: 6000
+  # Hold a chunk briefly after the last player leaves it. A Chromebook that
+  # walks a border back and forth otherwise triggers repeated load/unload and
+  # a fresh full chunk send every time.
+  delay-chunk-unloads-by: 20s
+  # Cap per-chunk entity saves so one mob-farm chunk cannot stall a save tick.
+  entity-per-chunk-save-limit:
+    arrow: 8
+    ender_pearl: 8
+    experience_orb: 16
+    fireball: 8
+    small_fireball: 8
+    snowball: 8
+  fixed-chunk-inhabited-time: -1
+  flush-regions-on-save: false
+  # Lower = smaller, more frequent save bursts instead of one long hitch that
+  # every client sees as a freeze.
+  max-auto-save-chunks-per-tick: 8
+  prevent-moving-into-unloaded-chunks: true
+
+collisions:
+  # Requested: cap collision resolution work per entity.
+  max-entity-collisions: 2
+  allow-player-cramming-damage: false
+  allow-vehicle-collisions: true
+  fix-climbing-bypassing-cramming-rule: false
+  only-players-collide: false
+
+entities:
+  armor-stands:
+    # Armour stands are pure client-side cost for zero gameplay value on a
+    # vanilla SMP. Don't tick them, don't run collision lookups for them.
+    do-collision-entity-lookups: false
+    tick: false
+  markers:
+    tick: false
+  behavior:
+    disable-chest-cat-detection: true
+    door-breaking-difficulty:
+      husk: [HARD]
+      vindicator: [NORMAL, HARD]
+      zombie: [HARD]
+      zombie_villager: [HARD]
+      zombified_piglin: [HARD]
+    ender-dragons-death-always-places-dragon-egg: false
+    experience-merge-max-value: 100
+    mobs-can-always-pick-up-loot:
+      skeletons: false
+      zombies: false
+    nerfed-mobs-should-jump: false
+    spawner-nerfed-mobs-should-jump: false
+    zombie-villager-infection-chance: default
+  spawning:
+    # Per-player caps instead of one global cap: mobs concentrate near the
+    # people who are actually online instead of being spread across the map.
+    per-player-mob-spawns: true
+    count-all-mobs-for-spawning: false
+    # Despawn ranges are the biggest single reduction in tracked entities.
+    # soft = starts despawning past this, hard = always despawns past this.
+    # Defaults are 32/128. At view-distance 5 nothing past ~80 blocks is even
+    # visible, so anything beyond that is pure wasted bandwidth.
+    despawn-ranges:
+      ambient:
+        hard: 64
+        soft: 24
+      axolotls:
+        hard: 64
+        soft: 24
+      creature:
+        hard: 80
+        soft: 32
+      misc:
+        hard: 64
+        soft: 24
+      monster:
+        hard: 80
+        soft: 32
+      underground_water_creature:
+        hard: 64
+        soft: 24
+      water_ambient:
+        hard: 48
+        soft: 16
+      water_creature:
+        hard: 64
+        soft: 24
+    alt-item-despawn-rate:
+      enabled: true
+      items:
+        cobblestone: 300
+        cobbled_deepslate: 300
+        netherrack: 300
+        dirt: 300
+        gravel: 600
+        sand: 600
+        flint: 600
+        kelp: 300
+        seagrass: 300
+        short_grass: 300
+        poisonous_potato: 300
+    creative-arrow-despawn-rate: 300
+    non-player-arrow-despawn-rate: 200
+    disable-mob-spawner-spawn-egg-transformation: false
+    duplicate-uuid:
+      mode: SAFE_REGEN
+      safe-regen-delete-range: 32
+    filter-bad-tile-entity-nbt-from-falling-blocks: true
+    iron-golems-can-spawn-in-air: false
+    scan-for-legacy-ender-dragon: false
+    slime-spawn-height:
+      slime-chunk:
+        maximum: 40.0
+      surface-biome:
+        maximum: 70.0
+        minimum: 50.0
+    spawn-limits:
+      ambient: -1
+      axolotls: -1
+      creature: -1
+      monster: -1
+      underground_water_creature: -1
+      water_ambient: -1
+      water_creature: -1
+    ticks-per-spawn:
+      ambient: -1
+      axolotls: -1
+      creature: -1
+      monster: -1
+      underground_water_creature: -1
+      water_ambient: -1
+      water_creature: -1
+    wateranimal-spawn-height:
+      maximum: default
+      minimum: default
+
+environment:
+  # Explosions recalculate ray-traces per block; the optimised path caches
+  # them. Visually identical, much cheaper on the host.
+  optimize-explosions: true
+  disable-explosion-knockback: false
+  disable-teleportation-suffocation-check: false
+  disable-thunder: false
+  generate-flat-bedrock: false
+  nether-ceiling-void-damage-height: disabled
+  portal-create-radius: 16
+  portal-search-vanilla-dimension-scaling: true
+  treasure-maps:
+    enabled: true
+    find-already-discovered:
+      loot-tables: default
+      villager-trade: false
+  water-over-lava-flow-speed: 5
+
+hopper:
+  # Hoppers fire an event per item move by default; on a survival server with
+  # storage rooms this is a measurable share of tick time for zero visible
+  # difference. Disabling the event is safe when no plugin listens to it --
+  # and this is a plugin-free vanilla SMP.
+  disable-move-event: true
+  ignore-occluding-blocks: true
+
+misc:
+  # Redstone/pathfinding churn: recalculating mob paths on every block update
+  # is a large host-side cost in any farm or villager area.
+  update-pathfinding-on-block-update: false
+  disable-end-credits: false
+  disable-relative-projectile-velocity: false
+  disable-sprint-interruption-on-attack: false
+  light-queue-size: 20
+  max-leash-distance: 10.0
+  redstone-implementation: ALTERNATE_CURRENT
+  show-sign-click-command-failure-msgs-to-player: false
+
+tick-rates:
+  behavior:
+    villager:
+      validatenearbypoi: -1
+  container-update: 1
+  grass-spread: 4
+  # Spawners only need to be evaluated every other tick.
+  mob-spawner: 2
+  sensor:
+    villager:
+      secondarypoisensor: 80
+
+unsupported-settings:
+  fix-invulnerable-end-crystal-exploit: true
