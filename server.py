@@ -34,6 +34,7 @@ import time
 import uuid
 import subprocess
 import shutil
+import signal
 import threading
 from collections import deque
 import posixpath
@@ -1110,6 +1111,140 @@ class ThreadingHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
         super().server_bind()
 
 
+SHUTDOWN_FILE = os.path.join(DATA, "shutdown.request")
+PANEL_PID_FILE = os.path.join(DATA, "panel.pid")
+_shutting_down = threading.Event()
+
+
+def _pid_alive(pid):
+    """Is this PID running? Works on POSIX and Windows."""
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        import ctypes
+
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+        k32 = ctypes.windll.kernel32
+        h = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not h:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            if k32.GetExitCodeProcess(h, ctypes.byref(code)):
+                return code.value == STILL_ACTIVE
+            return False
+        finally:
+            k32.CloseHandle(h)
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def read_panel_pid():
+    """Return the live panel's PID, or None. Clears a stale file."""
+    try:
+        with open(PANEL_PID_FILE) as f:
+            pid = int((f.read() or "0").strip())
+    except (OSError, ValueError):
+        return None
+    if _pid_alive(pid):
+        return pid
+    try:
+        os.remove(PANEL_PID_FILE)
+    except OSError:
+        pass
+    return None
+
+
+def write_panel_pid():
+    os.makedirs(DATA, exist_ok=True)
+    with open(PANEL_PID_FILE, "w") as f:
+        f.write(str(os.getpid()))
+
+
+def clear_panel_pid():
+    try:
+        os.remove(PANEL_PID_FILE)
+    except OSError:
+        pass
+
+
+def graceful_shutdown(reason="request"):
+    """Stop the proxy, flush the world, stop Paper -- then exit.
+
+    This is the ONLY safe way to stop. A plain kill leaves Paper with no
+    chance to save: the world then rolls back to the last autosave and a kill
+    that lands mid-region-write can corrupt chunks outright.
+    """
+    if _shutting_down.is_set():
+        return
+    _shutting_down.set()
+    print(f"\n  graceful shutdown ({reason}) -- saving the world ...")
+    try:
+        stop_game_server("smp")
+        print("  world saved, SMP stopped.")
+    except Exception as e:  # never let a shutdown path hang on an exception
+        print(f"  !! error during shutdown: {e!r}")
+    finally:
+        clear_panel_pid()
+        os._exit(0)
+
+
+def _shutdown_watcher():
+    """Watch for data/shutdown.request.
+
+    A Windows service stop cannot deliver SIGTERM to a Python child, so the
+    service wrapper drops this file instead (see `--shutdown`)."""
+    while True:
+        time.sleep(1.0)
+        if os.path.exists(SHUTDOWN_FILE):
+            try:
+                os.remove(SHUTDOWN_FILE)
+            except OSError:
+                pass
+            graceful_shutdown("stop requested")
+
+
+def request_shutdown():
+    """`--shutdown`: ask a running panel to stop, and wait until it has.
+
+    Waits on the panel's own PID file rather than on a port: the port check
+    depended on the caller exporting the same PORT, and unrelated software
+    listening there made this report failure after a successful shutdown."""
+    os.makedirs(DATA, exist_ok=True)
+    pid = read_panel_pid()
+    if pid is None:
+        print("  no panel running -- nothing to stop.")
+        return 0
+    with open(SHUTDOWN_FILE, "w") as f:
+        f.write(str(int(time.time())))
+    print(f"  stop requested (panel pid {pid}), waiting for the world to save ...")
+    for i in range(180):
+        time.sleep(1)
+        if not _pid_alive(pid):
+            print(f"  panel stopped cleanly after {i + 1}s.")
+            return 0
+    print(f"  !! panel pid {pid} still alive after 180s.")
+    return 1
+
+
+def install_signal_handlers():
+    def handler(signum, _frame):
+        graceful_shutdown(f"signal {signum}")
+
+    for name in ("SIGTERM", "SIGINT", "SIGBREAK"):
+        sig = getattr(signal, name, None)
+        if sig is None:
+            continue
+        try:
+            signal.signal(sig, handler)
+        except (ValueError, OSError, RuntimeError):
+            pass  # not all signals are settable on every platform/thread
+
+
 def check_bindings():
     """Verify nothing else already owns the ports we are about to bind."""
     clash = False
@@ -1125,6 +1260,8 @@ def main():
     init_db()
     admin_name = seed_admin()
 
+    if "--shutdown" in sys.argv:
+        raise SystemExit(request_shutdown())
     if "--init-db" in sys.argv:
         print(f"  database ready:     {DB_PATH}")
         print(f"  admin account:      '{admin_name}'")
@@ -1138,6 +1275,17 @@ def main():
     if os.environ.get("AUTOSTART_SMP") == "1" and os.path.isfile(SMP_JAR):
         ok, msg = start_game_server("smp", SMP_PORT)
         print(f"  smp autostart:      {msg}")
+    install_signal_handlers()
+    write_panel_pid()
+    # Clear a stale request so we do not immediately shut back down.
+    if os.path.exists(SHUTDOWN_FILE):
+        try:
+            os.remove(SHUTDOWN_FILE)
+        except OSError:
+            pass
+    threading.Thread(target=_shutdown_watcher, name="shutdown-watcher",
+                     daemon=True).start()
+
     httpd = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     print(f"EagleCraft platform running:  http://localhost:{PORT}")
     print(f"  accounts + worlds:  ready (quota {QUOTA_BYTES // (1024*1024)} MB/student)")
@@ -1148,8 +1296,7 @@ def main():
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
-        print("\nshutting down…")
-        stop_game_server("smp")
+        graceful_shutdown("ctrl-c")
 
 
 if __name__ == "__main__":

@@ -117,6 +117,33 @@ Two corrections worth knowing, because the internet still repeats both:
 
 Player-side settings are in [CHROMEBOOK-CLIENT-SETTINGS.md](CHROMEBOOK-CLIENT-SETTINGS.md).
 
+## Run it as a service (survives reboots)
+
+`start.sh` and the tunnel both die with the shell that launched them. To keep
+the SMP up across reboots, install both as Windows services from an
+**elevated** PowerShell:
+
+```powershell
+cd "C:\path	o\eaglecraft"
+.\service\install-services.ps1
+```
+
+That installs `eaglecraft` (the panel, which supervises Paper + the proxy) and
+`cloudflared` (the tunnel). Remove them with `-Uninstall`.
+
+Two details the installer handles that matter:
+
+* **It refuses to use `python3`.** In Git Bash that name is a Microsoft Store
+  app-execution alias under `WindowsApps` — a per-user reparse point a
+  LocalSystem service cannot follow. It finds a real `python.exe` instead.
+* **It never lets the service hard-kill the panel.** Stopping is wired to
+  `server.py --shutdown`, which stops the proxy, flushes the world and then
+  stops Paper, blocking until done. A plain kill gives Paper no chance to
+  save: the world rolls back to the last autosave and a kill landing
+  mid-region-write can corrupt chunks.
+
+Don't run `start.sh` while the service is running — they fight over ports.
+
 ## Scripts
 
 | Script | What it does |
