@@ -3,6 +3,9 @@
 /runtime/
 /logs/
 
+# Local secrets / knobs
+.env
+
 # Python
 __pycache__/
 *.pyc

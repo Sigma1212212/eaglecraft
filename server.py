@@ -34,6 +34,8 @@ import time
 import uuid
 import subprocess
 import shutil
+import threading
+from collections import deque
 from urllib.parse import urlparse, parse_qs
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -448,18 +450,40 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "is_admin": bool(user["is_admin"]),
                 "java": _java_available(),
                 "jar": os.path.isfile(SMP_JAR) and os.path.isfile(BUNGEE_JAR),
+                "backend": {
+                    "running": BACKEND.running,
+                    "ready": BACKEND.ready,
+                    "uptime": BACKEND.uptime(),
+                    "heap_mb": BACKEND.heap_mb,
+                },
+                "proxy": {
+                    "running": PROXY.running,
+                    "ready": PROXY.ready,
+                    "uptime": PROXY.uptime(),
+                    "heap_mb": PROXY.heap_mb,
+                },
+                "players": online_players(),
+                "ram_budget_mb": SMP_RAM_MB,
             })
 
         if path == "/api/smp/log":
             user = self._current_user()
             if not user or not user["is_admin"]:
                 return self._err("forbidden", 403)
-            logf = os.path.join(SMP_DIR, "logs", "latest.log")
-            lines = []
-            if os.path.isfile(logf):
-                with open(logf, "rb") as f:
-                    lines = f.read().decode("utf-8", "replace").splitlines()[-60:]
-            return self._json({"log": "\n".join(lines)})
+            target = (query.get("target") or ["paper"])[0]
+            try:
+                after = int((query.get("after") or ["0"])[0])
+            except (TypeError, ValueError):
+                after = 0
+            rows, cursor = console_tail(target, after)
+            return self._json({
+                # legacy field: whole visible buffer as one blob
+                "log": "\n".join(line for _id, line in rows),
+                # incremental field: only what you have not seen yet
+                "lines": [{"id": i, "line": t} for i, t in rows],
+                "cursor": cursor,
+                "running": is_server_running(target),
+            })
 
         return self._err("not found", 404)
 
@@ -653,9 +677,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._err("only the admin can run server commands", 403)
         data = self._json_body()
         cmd = (data or {}).get("command", "").strip()
+        target = ((data or {}).get("target") or "paper").strip()
         if not cmd:
             return self._err("empty command")
-        ok, msg = send_smp_command(cmd)
+        ok, msg = send_smp_command(cmd, target)
         if not ok:
             return self._err(msg, 503)
         return self._json({"ok": True, "note": msg})
@@ -668,52 +693,313 @@ class Handler(http.server.BaseHTTPRequestHandler):
 # passes through this web app. Needs Java + an Eaglercraft server jar at
 # data/eaglercraftserver.jar; if either is missing we report it cleanly.
 # --------------------------------------------------------------------------- #
-_running = {}  # sid -> Popen
-
-# SMP stack: BungeeCord proxy (EaglerXServer) -> Paper 1.20.4 backend
-# (ViaVersion/Backwards/Rewind so 1.8 Eaglercraft clients work + EssentialsX).
-SMP_DIR = os.path.join(DATA, "smp")            # Paper backend
+SMP_DIR = os.path.join(DATA, "smp")            # Paper 1.20.4 backend
 SMP_JAR = os.path.join(SMP_DIR, "paper.jar")
-BUNGEE_DIR = os.path.join(DATA, "bungee")      # proxy (player-facing)
+BUNGEE_DIR = os.path.join(DATA, "bungee")      # BungeeCord + EaglerXServer
 BUNGEE_JAR = os.path.join(BUNGEE_DIR, "BungeeCord.jar")
-# RAM for the SMP (16 GB so the server-side render stays smooth for everyone).
-# -Xms stays small and grows up to this ceiling. Editable via SMP_RAM_MB env.
-SMP_RAM_MB = int(os.environ.get("SMP_RAM_MB", "16384"))
+
+# RAM. SMP_RAM_MB is the budget for the WHOLE network, not just the backend:
+# the proxy takes a small fixed slice and Paper receives everything else. That
+# keeps one knob for the operator and stops the two heaps from over-committing
+# the host when the box only has 8 GB.
+SMP_RAM_MB = int(os.environ.get("SMP_RAM_MB", "4096"))
+PROXY_RAM_MB = int(os.environ.get("SMP_PROXY_RAM_MB", "512"))
+BACKEND_RAM_MB = max(1024, SMP_RAM_MB - PROXY_RAM_MB)
+
+# How many console lines we keep in RAM per process for the web console.
+CONSOLE_LINES = int(os.environ.get("SMP_CONSOLE_LINES", "800"))
+
+# How long start_game_server waits for "Done (x.xxxs)!" before it brings the
+# proxy up anyway (the proxy tolerates a backend that is still booting).
+BACKEND_READY_TIMEOUT = int(os.environ.get("SMP_READY_TIMEOUT", "180"))
 
 
-# The Eaglercraft SMP needs TWO Java versions:
-#   * Java 8  for the native Paper 1.8.8 backend (so 1.8 clients render natively,
-#     no ViaVersion translation that breaks chunk rendering).
-#   * Java 21 for the BungeeCord proxy / EaglerXServer (it's compiled for 17+).
-def _find_java(patterns, env_var):
-    glob = __import__("glob")
-    if os.environ.get(env_var):
-        cand = os.path.join(os.environ[env_var], "bin", "java")
+# --------------------------------------------------------------------------- #
+# Java 21 discovery
+#
+# Paper 1.20.4 requires Java 17+, and EaglerXServer/BungeeCord are compiled for
+# 17+ as well, so BOTH children run on the same Java 21 runtime. (An earlier
+# revision of this file launched the backend with Java 8 for a native 1.8.8
+# jar; that combination cannot load a 1.20.4 Paper build -- it dies with
+# UnsupportedClassVersionError before it ever prints a log line.)
+# --------------------------------------------------------------------------- #
+def _find_java21():
+    import glob as _glob
+
+    exe = "java.exe" if os.name == "nt" else "java"
+    home = os.environ.get("JAVA21_HOME", "").strip()
+    if home:
+        cand = os.path.join(home, "bin", exe)
         if os.path.isfile(cand):
             return cand
+    patterns = [
+        os.path.join(ROOT, "runtime", "jdk-21*"),
+        os.path.join(ROOT, "runtime", "jre-21*"),
+        "/config/jdk-21*",
+    ]
     for pat in patterns:
-        for d in sorted(glob.glob(pat)):
-            cand = os.path.join(d, "bin", "java")
-            if os.path.isfile(cand):
-                return cand
-    return None
+        for d in sorted(_glob.glob(pat)):
+            for cand in (os.path.join(d, "bin", exe),
+                         os.path.join(d, "Contents", "Home", "bin", exe)):
+                if os.path.isfile(cand):
+                    return cand
+    return shutil.which("java")
 
 
-_JAVA21 = _find_java([os.path.join(ROOT, "runtime", "jdk-21*"), "/config/jdk-21*"], "JAVA21_HOME")
-_JAVA8 = _find_java([os.path.join(ROOT, "runtime", "jdk8u*"), "/config/jdk8u*"], "JAVA8_HOME")
+_JAVA21 = _find_java21()
 
 
-def _java_bin():            # proxy / general (Java 21)
-    return _JAVA21 or shutil.which("java")
+def _java_bin():
+    """Re-resolve lazily so a setup.sh run does not require a web restart."""
+    global _JAVA21
+    if not _JAVA21 or not os.path.isfile(_JAVA21):
+        _JAVA21 = _find_java21()
+    return _JAVA21
 
 
-def _java8_bin():           # the 1.8.8 backend
-    return _JAVA8 or _java_bin()
+def _java_available():
+    return _java_bin() is not None
+
+
+def aikar_flags(heap_mb):
+    """Aikar's G1GC tuning -- removes the GC pauses that clients see as lag.
+
+    The large-heap variant only makes sense at >=12 GB; using it on a 4 GB heap
+    starves the old generation and makes pauses worse, so we scale it."""
+    big = heap_mb >= 12288
+    return [
+        "-XX:+UseG1GC",
+        "-XX:+ParallelRefProcEnabled",
+        "-XX:MaxGCPauseMillis=200",
+        "-XX:+UnlockExperimentalVMOptions",
+        "-XX:+DisableExplicitGC",
+        "-XX:+AlwaysPreTouch",
+        "-XX:G1NewSizePercent=" + ("40" if big else "30"),
+        "-XX:G1MaxNewSizePercent=" + ("50" if big else "40"),
+        "-XX:G1HeapRegionSize=" + ("16M" if big else "8M"),
+        "-XX:G1ReservePercent=" + ("15" if big else "20"),
+        "-XX:G1HeapWastePercent=5",
+        "-XX:G1MixedGCCountTarget=4",
+        "-XX:InitiatingHeapOccupancyPercent=" + ("20" if big else "15"),
+        "-XX:G1MixedGCLiveThresholdPercent=90",
+        "-XX:G1RSetUpdatingPauseTimePercent=5",
+        "-XX:SurvivorRatio=32",
+        "-XX:+PerfDisableSharedMem",
+        "-XX:MaxTenuringThreshold=1",
+        "-Dusing.aikars.flags=https://mcflags.emc.gs",
+        "-Daikars.new.flags=true",
+    ]
+
+
+# --------------------------------------------------------------------------- #
+# A supervised Java child process.
+#
+# stdout/stderr are merged and drained by a dedicated daemon thread into
+# (a) an in-memory ring buffer the web console reads, and (b) console.log on
+# disk. stdin stays open on a pipe so the dashboard can type commands. Nothing
+# here ever blocks an HTTP worker thread: the reader owns the pipe, the writer
+# only takes a short lock around one write+flush.
+# --------------------------------------------------------------------------- #
+_JOIN_RE = re.compile(r"\]:\s+([A-Za-z0-9_]{1,16}) joined the game")
+_QUIT_RE = re.compile(r"\]:\s+([A-Za-z0-9_]{1,16}) left the game")
+_DONE_RE = re.compile(r"Done \([\d.]+s\)!")
+_PROXY_READY_RE = re.compile(r"Listening on|Enabled .*EaglerXServer|Listening for eaglercraft")
+
+
+class JavaProcess:
+    def __init__(self, key, cwd, jar, heap_mb, stop_cmd,
+                 jvm_extra=(), jar_args=(), aikar=True, ready_re=None):
+        self.key = key
+        self.cwd = cwd
+        self.jar = jar
+        self.heap_mb = heap_mb
+        self.stop_cmd = stop_cmd
+        self.jvm_extra = list(jvm_extra)
+        self.jar_args = list(jar_args)
+        self.aikar = aikar
+        self.ready_re = ready_re
+
+        self.proc = None
+        self.started = 0.0
+        self.ready = False
+        self.players = set()
+        self.lines = deque(maxlen=CONSOLE_LINES)   # (id, text)
+        self._next_id = 1
+        self._lock = threading.RLock()
+        self._stdin_lock = threading.Lock()
+        self._logf = None
+
+    # -- state ------------------------------------------------------------ #
+    @property
+    def running(self):
+        return self.proc is not None and self.proc.poll() is None
+
+    def uptime(self):
+        return int(time.time() - self.started) if self.running else 0
+
+    def argv(self):
+        gc = aikar_flags(self.heap_mb) if self.aikar else [
+            "-XX:+UseG1GC", "-XX:MaxGCPauseMillis=100", "-XX:+ParallelRefProcEnabled",
+        ]
+        return [_java_bin(), f"-Xms{self.heap_mb}M", f"-Xmx{self.heap_mb}M",
+                *gc, *self.jvm_extra, "-Dfile.encoding=UTF-8",
+                "-jar", self.jar, *self.jar_args]
+
+    # -- console ---------------------------------------------------------- #
+    def _emit(self, text):
+        with self._lock:
+            self.lines.append((self._next_id, text))
+            self._next_id += 1
+        if self._logf:
+            try:
+                self._logf.write(text + "\n")
+                self._logf.flush()
+            except (OSError, ValueError):
+                pass
+
+    def tail(self, after=0):
+        """Return ((id, line), ...) newer than `after`, plus the new cursor."""
+        with self._lock:
+            rows = [(i, t) for i, t in self.lines if i > after]
+            cursor = self._next_id - 1
+        return rows, cursor
+
+    # -- lifecycle -------------------------------------------------------- #
+    def start(self):
+        with self._lock:
+            if self.running:
+                return True, f"{self.key} already running"
+            java = _java_bin()
+            if not java:
+                return False, "Java 21 not found -- run setup.sh"
+            if not os.path.isfile(self.jar):
+                return False, f"{os.path.basename(self.jar)} missing -- run setup.sh"
+            os.makedirs(self.cwd, exist_ok=True)
+            try:
+                self._logf = open(os.path.join(self.cwd, "console.log"),
+                                  "a", encoding="utf-8", errors="replace")
+            except OSError:
+                self._logf = None
+            argv = self.argv()
+            self._emit("$ " + " ".join(argv))
+            creation = 0
+            if os.name == "nt":
+                creation = subprocess.CREATE_NEW_PROCESS_GROUP
+            try:
+                self.proc = subprocess.Popen(
+                    argv,
+                    cwd=self.cwd,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    bufsize=1,
+                    universal_newlines=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    creationflags=creation,
+                )
+            except OSError as e:
+                self._emit(f"!! failed to launch {self.key}: {e}")
+                return False, f"failed to launch {self.key}: {e}"
+            self.started = time.time()
+            self.ready = False
+            self.players.clear()
+            threading.Thread(target=self._pump, name=f"{self.key}-stdout",
+                             daemon=True).start()
+            return True, (f"{self.key} starting (pid {self.proc.pid}, "
+                          f"{self.heap_mb} MB heap)")
+
+    def _pump(self):
+        proc = self.proc
+        if proc is None or proc.stdout is None:
+            return
+        try:
+            for raw in iter(proc.stdout.readline, ""):
+                line = raw.rstrip("\r\n")
+                if not line:
+                    continue
+                if not self.ready:
+                    if self.ready_re and self.ready_re.search(line):
+                        self.ready = True
+                m = _JOIN_RE.search(line)
+                if m:
+                    self.players.add(m.group(1))
+                m = _QUIT_RE.search(line)
+                if m:
+                    self.players.discard(m.group(1))
+                self._emit(line)
+        except (OSError, ValueError):
+            pass
+        finally:
+            code = proc.poll()
+            self.ready = False
+            self.players.clear()
+            self._emit(f"-- {self.key} exited with code {code} --")
+            if self._logf:
+                try:
+                    self._logf.close()
+                except OSError:
+                    pass
+                self._logf = None
+
+    def send(self, cmd):
+        if not self.running or self.proc is None or self.proc.stdin is None:
+            return False, f"{self.key} is not running"
+        try:
+            with self._stdin_lock:
+                self.proc.stdin.write(cmd.rstrip("\n") + "\n")
+                self.proc.stdin.flush()
+        except (OSError, ValueError, BrokenPipeError) as e:
+            return False, f"could not send to {self.key}: {e}"
+        self._emit("> " + cmd)
+        return True, f"sent to {self.key}: {cmd}"
+
+    def stop(self, timeout=45):
+        with self._lock:
+            if not self.running:
+                return
+            self._emit(f"-- graceful shutdown: '{self.stop_cmd}' --")
+            self.send(self.stop_cmd)
+            deadline = time.time() + timeout
+            while time.time() < deadline and self.running:
+                time.sleep(0.25)
+            if self.running:
+                self._emit("-- grace period expired, terminating --")
+                try:
+                    self.proc.terminate()
+                    self.proc.wait(timeout=10)
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
+            if self.running:
+                self._emit("-- still alive, killing --")
+                try:
+                    self.proc.kill()
+                except OSError:
+                    pass
+            self.ready = False
+
+
+# The two children. The backend binds 127.0.0.1 only (see server.properties):
+# players never touch it directly, they always come through the proxy.
+BACKEND = JavaProcess(
+    "paper", SMP_DIR, SMP_JAR, BACKEND_RAM_MB, "stop",
+    jvm_extra=("-Dcom.mojang.eula.agree=true",),
+    jar_args=("--nogui",), aikar=True, ready_re=_DONE_RE,
+)
+PROXY = JavaProcess(
+    "proxy", BUNGEE_DIR, BUNGEE_JAR, PROXY_RAM_MB, "end",
+    jvm_extra=("-Djava.net.preferIPv4Stack=true",),
+    jar_args=(), aikar=False, ready_re=_PROXY_READY_RE,
+)
+
+# Aliases so older call sites ("smp", "smp_proxy") keep working.
+PROCS = {"paper": BACKEND, "backend": BACKEND, "smp": BACKEND,
+         "proxy": PROXY, "bungee": PROXY, "smp_proxy": PROXY}
 
 
 def is_server_running(sid):
-    p = _running.get(sid)
-    return p is not None and p.poll() is None
+    p = PROCS.get(sid)
+    return bool(p and p.running)
 
 
 def _port_listening(port):
@@ -726,89 +1012,69 @@ def _port_listening(port):
 
 
 def smp_online():
-    """Player-facing status: is the Bungee proxy port accepting connections?
-    Port-based so it stays correct even if the web server restarted."""
-    return is_server_running("smp_proxy") or _port_listening(SMP_PORT)
+    """Player-facing status: is the proxy port accepting connections? Port-based
+    so it stays correct even if the web app restarted under a live network."""
+    return PROXY.running or _port_listening(SMP_PORT)
 
 
-def _java_available():
-    return _java_bin() is not None
+def online_players():
+    return sorted(BACKEND.players)
 
 
-# Aikar's flags — the standard Minecraft G1GC tuning that removes the GC pauses
-# that cause "lag spikes". Tuned for a large (>=12 GB) heap.
-AIKAR_FLAGS = [
-    "-XX:+UseG1GC", "-XX:+ParallelRefProcEnabled", "-XX:MaxGCPauseMillis=200",
-    "-XX:+UnlockExperimentalVMOptions", "-XX:+DisableExplicitGC", "-XX:+AlwaysPreTouch",
-    "-XX:G1NewSizePercent=40", "-XX:G1MaxNewSizePercent=50", "-XX:G1HeapRegionSize=16M",
-    "-XX:G1ReservePercent=15", "-XX:G1HeapWastePercent=5", "-XX:G1MixedGCCountTarget=4",
-    "-XX:InitiatingHeapOccupancyPercent=20", "-XX:G1MixedGCLiveThresholdPercent=90",
-    "-XX:G1RSetUpdatingPauseTimePercent=5", "-XX:SurvivorRatio=32",
-    "-XX:+PerfDisableSharedMem", "-XX:MaxTenuringThreshold=1",
-    "-Dusing.aikars.flags=https://mcflags.emc.gs", "-Daikars.new.flags=true",
-]
+def console_tail(target="paper", after=0):
+    p = PROCS.get(target, BACKEND)
+    return p.tail(after)
 
 
-def _launch(java, jar, cwd, xms, xmx, extra_args=("nogui",), stdin_pipe=False, aikar=False):
-    gc = AIKAR_FLAGS if aikar else ["-XX:+UseG1GC"]
-    return subprocess.Popen(
-        [java, f"-Xms{xms}M", f"-Xmx{xmx}M", *gc, "-jar", jar, *extra_args],
-        cwd=cwd,
-        stdin=subprocess.PIPE if stdin_pipe else subprocess.DEVNULL,
-        stdout=open(os.path.join(cwd, "console.log"), "ab"),
-        stderr=subprocess.STDOUT,
-    )
+def send_smp_command(cmd, target="paper"):
+    p = PROCS.get(target)
+    if p is None:
+        return False, f"unknown console target '{target}'"
+    return p.send(cmd)
 
 
-def send_smp_command(cmd):
-    """Write a console command to the running Paper backend (admin only)."""
-    p = _running.get("smp")
-    if not p or p.poll() is not None or not p.stdin:
-        return False, "SMP backend is not running (or was started before this web session)."
-    try:
-        p.stdin.write((cmd.rstrip("\n") + "\n").encode("utf-8"))
-        p.stdin.flush()
-    except (OSError, ValueError) as e:
-        return False, f"could not send: {e}"
-    return True, f"sent: {cmd}"
+def _start_proxy_when_ready():
+    """Wait for the backend to finish generating spawn, then open the door."""
+    deadline = time.time() + BACKEND_READY_TIMEOUT
+    while time.time() < deadline and BACKEND.running and not BACKEND.ready:
+        time.sleep(0.5)
+    if not _port_listening(SMP_PORT):
+        PROXY.start()
 
 
-def start_game_server(sid, port):
-    """Start the Paper backend, then the BungeeCord proxy (player-facing)."""
-    if is_server_running(sid) and is_server_running(sid + "_proxy"):
-        return True, "already running"
-    java8 = _java8_bin()      # native 1.8.8 backend
-    java21 = _java_bin()      # proxy / EaglerXServer
-    if not java8 or not java21:
-        return False, "Java is not installed — run setup.sh."
+def start_game_server(sid="smp", port=None):
+    """Start Paper, then BungeeCord once Paper is accepting connections.
+
+    Returns immediately -- the proxy is launched from a background thread so an
+    HTTP request never blocks for the length of a world load."""
+    port = SMP_PORT if port is None else port
+    if not _java_available():
+        return False, "Java 21 is not installed -- run setup.sh."
     if not os.path.isfile(SMP_JAR) or not os.path.isfile(BUNGEE_JAR):
-        return False, "SMP server not set up yet — run setup.sh."
-    xmx = SMP_RAM_MB
-    xms = min(2048, xmx)
-    try:
-        if not is_server_running(sid) and not _port_listening(25565):
-            _running[sid] = _launch(java8, SMP_JAR, SMP_DIR, xms, xmx,
-                                    stdin_pipe=True, aikar=True)
-        if not is_server_running(sid + "_proxy") and not _port_listening(SMP_PORT):
-            # The proxy is light; cap its heap at 1 GB.
-            _running[sid + "_proxy"] = _launch(
-                java21, BUNGEE_JAR, BUNGEE_DIR, 256, 1024, extra_args=())
-    except OSError as e:
-        return False, f"failed to launch: {e}"
-    return True, (f"SMP starting — backend {xmx} MB RAM, proxy on port {port}. "
-                  f"Give it ~30s to finish loading.")
+        return False, "SMP server not set up yet -- run setup.sh."
+    if BACKEND.running and PROXY.running:
+        return True, "already running"
+
+    notes = []
+    if not BACKEND.running and not _port_listening(25565):
+        ok, msg = BACKEND.start()
+        notes.append(msg)
+        if not ok:
+            return False, msg
+    if not PROXY.running:
+        threading.Thread(target=_start_proxy_when_ready,
+                         name="proxy-starter", daemon=True).start()
+        notes.append(f"proxy will open on :{port} once the world is loaded")
+    return True, " | ".join(notes) or "starting"
 
 
-def stop_game_server(sid):
-    # Stop the proxy first, then the backend.
-    for key in (sid + "_proxy", sid):
-        p = _running.pop(key, None)
-        if p and p.poll() is None:
-            p.terminate()
-            try:
-                p.wait(timeout=8)
-            except subprocess.TimeoutExpired:
-                p.kill()
+def stop_game_server(sid="smp"):
+    """Proxy first (clean disconnect), flush the world, then the backend."""
+    PROXY.stop(timeout=20)
+    if BACKEND.running:
+        BACKEND.send("save-all flush")
+        time.sleep(1.5)
+    BACKEND.stop(timeout=60)
 
 
 # --------------------------------------------------------------------------- #
@@ -823,9 +1089,28 @@ class ThreadingHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
         super().server_bind()
 
 
+def check_bindings():
+    """Verify nothing else already owns the ports we are about to bind."""
+    clash = False
+    for label, port in (("website", PORT), ("paper backend", 25565),
+                        ("eagler proxy", SMP_PORT)):
+        busy = _port_listening(port)
+        print(f"  {label:<14} :{port:<6} {'IN USE' if busy else 'free'}")
+        clash = clash or busy
+    return not clash
+
+
 def main():
     init_db()
     admin_name = seed_admin()
+
+    if "--init-db" in sys.argv:
+        print(f"  database ready:     {DB_PATH}")
+        print(f"  admin account:      '{admin_name}'")
+        return
+    if "--check-ports" in sys.argv:
+        raise SystemExit(0 if check_bindings() else 1)
+
     print(f"  admin account:      '{admin_name}' (edit data/admin.conf to change)")
     # AUTOSTART_SMP=1 boots the SMP on startup (so this process owns the
     # console pipe), letting one command bring up website + SMP together.
@@ -836,13 +1121,14 @@ def main():
     print(f"EagleCraft platform running:  http://localhost:{PORT}")
     print(f"  accounts + worlds:  ready (quota {QUOTA_BYTES // (1024*1024)} MB/student)")
     print(f"  SMP game port:      {SMP_PORT} (own dev tunnel)")
-    print(f"  java available:     {_java_available()}")
+    print(f"  java 21:            {_java_bin() or 'NOT FOUND - run setup.sh'}")
+    print(f"  ram budget:         {SMP_RAM_MB} MB total "
+          f"= paper {BACKEND_RAM_MB} MB + proxy {PROXY_RAM_MB} MB")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         print("\nshutting down…")
-        for sid in list(_running):
-            stop_game_server(sid)
+        stop_game_server("smp")
 
 
 if __name__ == "__main__":

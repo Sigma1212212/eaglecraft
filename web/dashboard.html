@@ -75,14 +75,15 @@
         <h2 style="font-size:15px;margin-bottom:6px">Server Console (admin)</h2>
         <pre id="console-out" style="background:#11141a;border:1px solid var(--line);border-radius:8px;padding:10px;height:150px;overflow:auto;font-size:11px;margin:0 0 8px">…</pre>
         <div class="row">
-          <input type="text" id="console-cmd" placeholder="e.g. op YourName   ·   setspawn   ·   eco give YourName 1000"
+          <input type="text" id="console-cmd" placeholder="e.g. op YourName   ·   time set day   ·   whitelist add Name"
                  style="flex:1;font-family:monospace" onkeydown="if(event.key==='Enter')sendCmd()">
           <button class="btn small" onclick="sendCmd()">Send</button>
         </div>
         <div class="note" style="margin-top:8px">
-          Set up spawn &amp; shop: <code>op &lt;yourName&gt;</code> then in-game use
-          <code>/setspawn</code>, and place signs — line 1 <code>[Buy]</code> or
-          <code>[Sell]</code>, line 2 amount, line 3 item, line 4 price.
+          Vanilla survival — no economy, no shops, no plugins. Commands go
+          straight into Paper's console. Get yourself op with
+          <code>op &lt;yourName&gt;</code>, then set the world spawn in-game with
+          <code>/setworldspawn</code>.
         </div>
       </div>
 
