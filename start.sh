@@ -23,6 +23,19 @@ if [ -z "$PY" ]; then
   echo "!! python3 not found."; exit 1
 fi
 
+PIDFILE="logs/web.pid"
+
+# pgrep does not exist in Git Bash on Windows, so the old pgrep guard silently
+# never fired there and a second panel could be started on top of a live one.
+# A PID file works identically on Linux, macOS and Git Bash.
+panel_running() {
+  [ -f "$PIDFILE" ] || return 1
+  local pid
+  pid="$(cat "$PIDFILE" 2>/dev/null || true)"
+  [ -n "$pid" ] || return 1
+  kill -0 "$pid" 2>/dev/null
+}
+
 # --- 1. environment --------------------------------------------------------
 if [ -f .env ]; then
   echo "Loading .env"
@@ -63,19 +76,26 @@ if ! "$PY" server.py --check-ports; then
 fi
 
 # --- 4. web panel + supervised SMP ----------------------------------------
-if pgrep -f "server.py" >/dev/null 2>&1; then
-  echo "Web server already running."
+if panel_running; then
+  echo "Web panel already running (pid $(cat "$PIDFILE"))."
 else
   echo "Starting web panel + SMP on :$PORT ..."
   nohup "$PY" server.py > logs/web.log 2>&1 &
+  echo $! > "$PIDFILE"
   echo "  pid $!  (log: logs/web.log)"
   # Give Paper a moment so the first dashboard load shows a live console.
   sleep 3
+  if ! panel_running; then
+    echo "!! panel exited immediately -- last lines of logs/web.log:"
+    tail -20 logs/web.log
+    rm -f "$PIDFILE"
+    exit 1
+  fi
 fi
 
 # --- 5. dev tunnel ---------------------------------------------------------
 if [ -x "$DEVTUNNEL" ] && "$DEVTUNNEL" user show >/dev/null 2>&1; then
-  if pgrep -f "devtunnel host eaglecraft" >/dev/null 2>&1; then
+  if [ -f logs/tunnel.pid ] && kill -0 "$(cat logs/tunnel.pid)" 2>/dev/null; then
     echo "Dev tunnel already running."
   else
     echo "Starting Microsoft Dev Tunnel (anonymous) ..."
@@ -85,6 +105,7 @@ if [ -x "$DEVTUNNEL" ] && "$DEVTUNNEL" user show >/dev/null 2>&1; then
       "$DEVTUNNEL" port create eaglecraft -p "$SMP_PORT" --protocol http
     fi
     nohup "$DEVTUNNEL" host eaglecraft > logs/tunnel.log 2>&1 &
+    echo $! > logs/tunnel.pid
     echo "  pid $!  (public URLs in logs/tunnel.log)"
   fi
 else
