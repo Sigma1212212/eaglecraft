@@ -25,7 +25,8 @@ param(
     [int]$Port = 8081,
     [int]$SmpPort = 25577,
     [int]$RamMb = 8192,
-    [int]$ProxyRamMb = 512
+    [int]$ProxyRamMb = 512,
+    [string]$CloudflaredConfig = (Join-Path $env:USERPROFILE '.cloudflared\config.yml')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -33,6 +34,34 @@ $ErrorActionPreference = 'Stop'
 function Say  ($m) { Write-Host "==> $m" -ForegroundColor Green }
 function Warn ($m) { Write-Host "  !! $m" -ForegroundColor Yellow }
 function Die  ($m) { Write-Host "  !! $m" -ForegroundColor Red; exit 1 }
+
+function Run([string]$Exe, [string[]]$ArgList) {
+    # Windows PowerShell 5.1 turns redirected native stderr into TERMINATING
+    # errors under ErrorActionPreference=Stop, and lets unpiped native output
+    # bypass Start-Transcript. WinSW and cloudflared both log to stderr, so
+    # route everything through Write-Host and hand back only the exit code.
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $Exe @ArgList 2>&1 | ForEach-Object { Write-Host "    $_" }
+        return $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+}
+
+function Wait-Until([scriptblock]$Test, [int]$Seconds, [string]$What) {
+    for ($i = 0; $i -le $Seconds; $i += 2) {
+        if (& $Test) { Write-Host "  ok: $What (${i}s)"; return $true }
+        Start-Sleep -Seconds 2
+    }
+    Warn "${What}: not within ${Seconds}s"
+    return $false
+}
+
+function Test-Listening([int]$p) {
+    [bool](Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue)
+}
 
 # --- elevation ------------------------------------------------------------
 $identity  = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -55,19 +84,22 @@ $Runtime = Join-Path $Repo 'runtime'
 $WinSW   = Join-Path $Runtime 'eaglecraft-service.exe'
 $SvcXml  = Join-Path $Runtime 'eaglecraft-service.xml'
 $CfExe   = Join-Path $Runtime 'cloudflared.exe'
+$CfLog   = Join-Path $Repo 'logs\cloudflared-service.log'
 
 Say "Repository: $Repo"
 
 # --- uninstall path -------------------------------------------------------
 if ($Uninstall) {
     Say 'Removing services'
-    if (Test-Path $WinSW) {
-        & $WinSW stop   2>$null | Out-Null
-        & $WinSW uninstall 2>$null | Out-Null
+    if (Get-Service -Name 'eaglecraft' -ErrorAction SilentlyContinue) {
+        # WinSW's stop runs server.py --shutdown, so the world is saved.
+        Run $WinSW @('stop') | Out-Null
+        Run $WinSW @('uninstall') | Out-Null
         Write-Host '  eaglecraft removed'
     }
-    if (Test-Path $CfExe) {
-        & $CfExe service uninstall 2>$null | Out-Null
+    if (Get-Service -Name 'cloudflared' -ErrorAction SilentlyContinue) {
+        Stop-Service -Name 'cloudflared' -Force -ErrorAction SilentlyContinue
+        Run $CfExe @('service', 'uninstall') | Out-Null
         Write-Host '  cloudflared removed'
     }
     Say 'Done.'
@@ -79,17 +111,20 @@ if ($Uninstall) {
 # alias under %LOCALAPPDATA%\Microsoft\WindowsApps, which is a per-user
 # reparse point that a LocalSystem service cannot follow.
 Say 'Locating a real Python interpreter'
-$Python = $null
 $candidates = @()
+$prev = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
 try {
-    $candidates += (& py -0p 2>$null |
+    $candidates += @(& py -0p 2>$null |
         ForEach-Object { ($_ -replace '^\s*-V:\S+\s*\*?\s*', '').Trim() })
-} catch { }
+} catch { } finally { $ErrorActionPreference = $prev }
 $candidates += @(
-    'C:\Python314\python.exe', 'C:\Python312\python.exe', 'C:\Python311\python.exe',
+    'C:\Python314\python.exe', 'C:\Python313\python.exe',
+    'C:\Python312\python.exe', 'C:\Python311\python.exe',
     "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe",
     "$env:LOCALAPPDATA\Programs\Python\Python311\python.exe"
 )
+$Python = $null
 foreach ($c in $candidates) {
     if ([string]::IsNullOrWhiteSpace($c)) { continue }
     if ($c -like '*WindowsApps*') { continue }   # Store alias: unusable as a service
@@ -98,8 +133,7 @@ foreach ($c in $candidates) {
 if (-not $Python) {
     Die 'No usable python.exe found. Install Python from python.org (not the Microsoft Store).'
 }
-$pyver = (& $Python --version 2>&1)
-Write-Host "  $Python  ($pyver)"
+Write-Host "  $Python"
 
 # --- WinSW ----------------------------------------------------------------
 if (-not (Test-Path $WinSW)) {
@@ -111,11 +145,28 @@ if (-not (Test-Path $WinSW)) {
 }
 Write-Host "  wrapper: $WinSW"
 
-# --- stop anything already running from a shell ---------------------------
-Say 'Stopping any panel started from a terminal'
+# --- stop anything already running from a terminal ------------------------
+Say 'Stopping any panel started from a terminal (saves the world first)'
 Push-Location $Repo
-try { & $Python 'server.py' '--shutdown' } catch { Warn "shutdown probe: $_" }
-Pop-Location
+try { Run $Python @('server.py', '--shutdown') | Out-Null } finally { Pop-Location }
+
+# Anything still holding our ports is a leftover from an old hard kill. Our
+# own Java children (command line points into runtime\) are safe to clear;
+# anything else is a genuine conflict the operator must resolve.
+foreach ($p in @($Port, 25565, $SmpPort)) {
+    $conn = Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if (-not $conn) { continue }
+    $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$($conn.OwningProcess)"
+    if (-not $proc) { continue }
+    if ($proc.CommandLine -and $proc.CommandLine -like "*$Runtime*") {
+        Warn "port $p held by leftover $($proc.Name) pid $($proc.ProcessId) - stopping it"
+        Stop-Process -Id $proc.ProcessId -Force
+        Start-Sleep -Seconds 2
+    } else {
+        Die "port $p is in use by $($proc.Name) (pid $($proc.ProcessId)). Free it, or re-run with -Port."
+    }
+}
 
 # --- generate the service definition --------------------------------------
 Say 'Writing service definition'
@@ -140,8 +191,9 @@ $xml = @"
 
   <!-- Never hard-kill the panel: that kills Paper with no save, rolling the
        world back to the last autosave and risking region corruption.
-       --shutdown stops the proxy, flushes the world, then stops Paper, and
-       blocks until done (~65s measured). -->
+       The stop action runs server.py with its shutdown flag, which stops the
+       proxy, flushes the world, then stops Paper, and blocks until done
+       (about 65s measured). No double hyphens in XML comments. -->
   <stopexecutable>$Python</stopexecutable>
   <stoparguments>server.py --shutdown</stoparguments>
   <stoptimeout>150 sec</stoptimeout>
@@ -159,50 +211,92 @@ $xml = @"
   </log>
 </service>
 "@
-Set-Content -Path $SvcXml -Value $xml -Encoding UTF8
+# Validate before WinSW sees it: a malformed definition makes WinSW die
+# with a .NET stack trace, after we have already stopped the running panel.
+try { [xml]$xml | Out-Null } catch { Die "generated service XML is invalid: $($_.Exception.Message)" }
+[IO.File]::WriteAllText($SvcXml, $xml)
 Write-Host "  $SvcXml"
 
 # --- install + start the panel service ------------------------------------
 Say 'Installing service: eaglecraft'
 if (Get-Service -Name 'eaglecraft' -ErrorAction SilentlyContinue) {
     Warn 'already installed - reinstalling to pick up config changes'
-    & $WinSW stop 2>$null | Out-Null
-    & $WinSW uninstall  | Out-Null
+    Run $WinSW @('stop') | Out-Null
+    Run $WinSW @('uninstall') | Out-Null
     Start-Sleep -Seconds 3
 }
-& $WinSW install
-& $WinSW start
-Start-Sleep -Seconds 5
+if ((Run $WinSW @('install')) -ne 0) { Die 'WinSW install failed' }
+if ((Run $WinSW @('start')) -ne 0) { Die 'WinSW start failed - see logs\eaglecraft.wrapper.log' }
 
-# --- install + start cloudflared ------------------------------------------
-if (Test-Path $CfExe) {
-    $cfCfg = Join-Path $env:USERPROFILE '.cloudflared\config.yml'
-    if (Test-Path $cfCfg) {
-        Say 'Installing service: cloudflared'
-        if (Get-Service -Name 'cloudflared' -ErrorAction SilentlyContinue) {
-            Warn 'already installed - skipping'
-        } else {
-            & $CfExe --config $cfCfg service install
-            Start-Sleep -Seconds 3
-        }
-    } else {
-        Warn "no $cfCfg - run 'bash cloudflare.sh named <host> <host>' first"
-    }
+Say 'Waiting for the stack to come up'
+Wait-Until { try { (Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 "http://127.0.0.1:$Port/").StatusCode -eq 200 } catch { $false } } 60 "panel answering on :$Port" | Out-Null
+Wait-Until { Test-Listening 25565 } 180 'Paper listening on 127.0.0.1:25565' | Out-Null
+Wait-Until { Test-Listening $SmpPort } 180 "proxy listening on :$SmpPort" | Out-Null
+
+# --- install + configure cloudflared --------------------------------------
+if (-not (Test-Path $CfExe)) {
+    Warn 'cloudflared.exe not in runtime\ - run cloudflare.sh first'
+} elseif (-not (Test-Path $CloudflaredConfig)) {
+    Warn "no $CloudflaredConfig - run 'bash cloudflare.sh named <game-host> <web-host>' first"
 } else {
-    Warn 'cloudflared.exe not in runtime/ - run cloudflare.sh first'
+    Say 'Preparing tunnel config for a LocalSystem service'
+    $cfDir = Split-Path -Parent $CloudflaredConfig
+    $cred  = Get-ChildItem -Path $cfDir -Filter '*.json' | Select-Object -First 1
+    if (-not $cred) { Die "no tunnel credentials json in $cfDir" }
+    $tunnelId = [IO.Path]::GetFileNameWithoutExtension($cred.Name)
+    $cert = Join-Path $cfDir 'cert.pem'
+
+    # A LocalSystem service has its OWN profile, so it cannot find cert.pem
+    # in this user's .cloudflared. Running the tunnel by NAME needs that cert
+    # to look the name up; running by UUID with a credentials file does not.
+    $cfg = [IO.File]::ReadAllText($CloudflaredConfig)
+    $cfg = [regex]::Replace($cfg, '(?m)^tunnel:.*$', "tunnel: $tunnelId")
+    if (($cfg -notmatch '(?m)^origincert:') -and (Test-Path $cert)) {
+        $cfg = [regex]::Replace($cfg, '(?m)^(tunnel:.*)$', "`$1`norigincert: $($cert -replace '\\', '/')")
+    }
+    [IO.File]::WriteAllText($CloudflaredConfig, $cfg)
+    Write-Host "  tunnel pinned to UUID $tunnelId"
+
+    if ((Run $CfExe @('--config', $CloudflaredConfig, 'tunnel', 'ingress', 'validate')) -ne 0) {
+        Die 'ingress config failed validation'
+    }
+
+    $svc = Get-Service -Name 'cloudflared' -ErrorAction SilentlyContinue
+    if (-not $svc) {
+        Say 'Installing service: cloudflared'
+        Run $CfExe @('service', 'install') | Out-Null
+        Start-Sleep -Seconds 3
+        $svc = Get-Service -Name 'cloudflared' -ErrorAction SilentlyContinue
+    } else {
+        Warn 'cloudflared service already exists - reconfiguring it'
+    }
+    if (-not $svc) { Die 'cloudflared service did not register' }
+
+    # `service install` without a token registers a bare cloudflared.exe with
+    # no subcommand, which starts and does nothing. Point it at our config
+    # and tell it to actually run the tunnel.
+    Stop-Service -Name $svc.Name -Force -ErrorAction SilentlyContinue
+    $img = '"{0}" --config "{1}" tunnel --no-autoupdate --logfile "{2}" run' -f $CfExe, $CloudflaredConfig, $CfLog
+    Set-ItemProperty -Path ('HKLM:\SYSTEM\CurrentControlSet\Services\' + $svc.Name) -Name ImagePath -Value $img
+    Set-Service -Name $svc.Name -StartupType Automatic
+    Remove-Item $CfLog -ErrorAction SilentlyContinue
+    Start-Service -Name $svc.Name
+    Wait-Until {
+        (Test-Path $CfLog) -and (Select-String -Path $CfLog -Pattern 'Registered tunnel connection' -Quiet)
+    } 60 'tunnel connected to the Cloudflare edge' | Out-Null
 }
 
 # --- report ---------------------------------------------------------------
 Say 'Status'
 Get-Service -Name 'eaglecraft', 'cloudflared' -ErrorAction SilentlyContinue |
-    Format-Table Name, Status, StartType -AutoSize
+    Select-Object Name, Status, StartType | Format-Table -AutoSize | Out-String | Write-Host
 
-Write-Host ''
 Write-Host '  The SMP now starts automatically at boot.' -ForegroundColor Green
 Write-Host "  Panel:    http://localhost:$Port"
-Write-Host "  Logs:     $Repo\logs\eaglecraft.out.log"
-Write-Host '  Control:  Start-Service eaglecraft / Stop-Service eaglecraft'
+Write-Host "  Logs:     $Repo\logs\eaglecraft.out.log, $CfLog"
+Write-Host '  Control:  Restart-Service eaglecraft   (Administrator)'
 Write-Host '  Remove:   .\service\install-services.ps1 -Uninstall'
 Write-Host ''
 Write-Host '  Do NOT also run start.sh while the service is running -' -ForegroundColor Yellow
 Write-Host '  both would fight over ports 8081 / 25565 / 25577.' -ForegroundColor Yellow
+exit 0

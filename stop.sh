@@ -6,6 +6,20 @@
 # before reaching for the jars directly.
 cd "$(dirname "$0")"
 
+# If the Windows service owns the stack, a second copy started from a
+# terminal would fight it for 8081/25565/25577 and leave orphans behind.
+service_running() {
+  command -v sc.exe >/dev/null 2>&1 || return 1
+  sc.exe query eaglecraft 2>/dev/null | grep -q RUNNING
+}
+
+if service_running; then
+  echo "EagleCraft is running as the 'eaglecraft' Windows service."
+  echo "Stop it from an Administrator PowerShell (this runs the save-then-stop path):"
+  echo "    Stop-Service eaglecraft"
+  exit 0
+fi
+
 # PID files first (portable); pkill is only a fallback and does not exist
 # everywhere -- Git Bash on Windows has no pgrep at all.
 stop_pidfile() {  # stop_pidfile <file> <label> <wait-seconds>

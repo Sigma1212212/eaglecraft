@@ -18,6 +18,19 @@ cd "$(dirname "$0")"
 ROOT="$(pwd)"
 mkdir -p logs data
 
+# If the Windows service owns the stack, a second copy started from a
+# terminal would fight it for 8081/25565/25577 and leave orphans behind.
+service_running() {
+  command -v sc.exe >/dev/null 2>&1 || return 1
+  sc.exe query eaglecraft 2>/dev/null | grep -q RUNNING
+}
+
+if service_running; then
+  echo "EagleCraft is running as the 'eaglecraft' Windows service -- not starting a second copy."
+  echo "  Restart it from an Administrator PowerShell:  Restart-Service eaglecraft"
+  exit 0
+fi
+
 PY="$(command -v python3 || command -v python || true)"
 if [ -z "$PY" ]; then
   echo "!! python3 not found."; exit 1
