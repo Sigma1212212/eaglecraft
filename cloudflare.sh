@@ -11,17 +11,22 @@
 #  port number into Eaglercraft's Direct Connect box. Websockets are proxied
 #  natively, which is exactly what Eaglercraft speaks.
 #
-#  Usage:   bash cloudflare.sh              # both tunnels
+#  Usage:   bash cloudflare.sh              # both quick tunnels
 #           bash cloudflare.sh smp          # game only (recommended)
 #           bash cloudflare.sh web          # website only
 #           bash cloudflare.sh stop
 #
-#  Quick-tunnel URLs are EPHEMERAL: they change every restart. For a stable
-#  address you need a Cloudflare account + a domain and a named tunnel:
+#           bash cloudflare.sh named mc.yourdomain.com
+#                                           # STABLE address on your own domain
+#
+#  Quick-tunnel URLs are EPHEMERAL -- a new random hostname every restart,
+#  which is useless for a server people are supposed to keep playing on.
+#  `named` binds the SMP to a hostname in a zone you already own and creates
+#  the DNS record for you. One-time browser authorisation first:
+#
 #     cloudflared tunnel login
-#     cloudflared tunnel create eaglecraft
-#     cloudflared tunnel route dns eaglecraft mc.yourdomain.com
-#     cloudflared tunnel run --url http://localhost:25577 eaglecraft
+#
+#  then `bash cloudflare.sh named mc.yourdomain.com` does create + route + run.
 # ===========================================================================
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -59,8 +64,9 @@ stop_pid() {
 }
 
 if [ "$MODE" = "stop" ]; then
-  stop_pid logs/cloudflared.pid     "SMP tunnel"
-  stop_pid logs/cloudflared-web.pid "web tunnel"
+  stop_pid logs/cloudflared.pid       "SMP quick tunnel"
+  stop_pid logs/cloudflared-web.pid   "web tunnel"
+  stop_pid logs/cloudflared-named.pid "named tunnel"
   echo "Done."
   exit 0
 fi
@@ -79,21 +85,91 @@ grab_url() {  # grab_url <logfile>
 launch() {  # launch <local-port> <logfile> <pidfile> <label>
   local port="$1" log="$2" pidf="$3" label="$4"
   if [ -f "$pidf" ] && kill -0 "$(cat "$pidf" 2>/dev/null)" 2>/dev/null; then
-    echo "$label tunnel already running."
+    echo "$label tunnel already running." >&2
     return 0
   fi
   # Refuse to publish a port nothing is serving -- otherwise you hand out a
   # URL that 502s and spend an hour blaming Cloudflare.
   if ! curl -s -o /dev/null -m 3 "http://127.0.0.1:$port/" \
        && ! (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
-    echo "!! nothing is listening on 127.0.0.1:$port -- run 'bash start.sh' first."
+    echo "!! nothing is listening on 127.0.0.1:$port -- run 'bash start.sh' first." >&2
     return 1
   fi
-  echo "Opening $label tunnel -> localhost:$port ..."
+  echo "Opening $label tunnel -> localhost:$port ..." >&2
   nohup "$CF" tunnel --no-autoupdate --url "http://localhost:$port" > "$log" 2>&1 &
   echo $! > "$pidf"
-  grab_url "$log" || { echo "!! no URL after 40s; see $log"; return 1; }
+  grab_url "$log" || { echo "!! no URL after 40s; see $log" >&2; return 1; }
 }
+
+# ===========================================================================
+#  Named tunnel: stable hostname on a domain you own.
+# ===========================================================================
+if [ "$MODE" = "named" ]; then
+  HOSTNAME_ARG="${2:-}"
+  TUNNEL_NAME="${TUNNEL_NAME:-eaglecraft}"
+  if [ -z "$HOSTNAME_ARG" ]; then
+    echo "!! usage: bash cloudflare.sh named mc.yourdomain.com"
+    exit 1
+  fi
+
+  # cloudflared stores the zone authorisation cert here after `tunnel login`.
+  CERT=""
+  for c in "$HOME/.cloudflared/cert.pem" "$USERPROFILE/.cloudflared/cert.pem"; do
+    [ -f "$c" ] && { CERT="$c"; break; }
+  done
+  if [ -z "$CERT" ]; then
+    echo "!! Not authorised with Cloudflare yet. Run this once (opens a browser,"
+    echo "   pick the zone you want):"
+    echo
+    echo "       $CF tunnel login"
+    echo
+    echo "   then re-run:  bash cloudflare.sh named $HOSTNAME_ARG"
+    exit 1
+  fi
+  echo "  authorised: $CERT"
+
+  if ! "$CF" tunnel info "$TUNNEL_NAME" >/dev/null 2>&1; then
+    echo "Creating tunnel '$TUNNEL_NAME' ..."
+    "$CF" tunnel create "$TUNNEL_NAME"
+  else
+    echo "Tunnel '$TUNNEL_NAME' already exists."
+  fi
+
+  # This is what actually creates the missing DNS record in the zone.
+  echo "Routing $HOSTNAME_ARG -> $TUNNEL_NAME ..."
+  "$CF" tunnel route dns --overwrite-dns "$TUNNEL_NAME" "$HOSTNAME_ARG" || true
+
+  if [ -f logs/cloudflared.pid ] && kill -0 "$(cat logs/cloudflared.pid 2>/dev/null)" 2>/dev/null; then
+    echo "Stopping the existing quick tunnel first ..."
+    kill "$(cat logs/cloudflared.pid)" 2>/dev/null || true
+    rm -f logs/cloudflared.pid
+    sleep 2
+  fi
+
+  echo "Starting named tunnel -> localhost:$SMP_PORT ..."
+  nohup "$CF" tunnel run --url "http://localhost:$SMP_PORT" "$TUNNEL_NAME" \
+        > logs/cf-named.log 2>&1 &
+  echo $! > logs/cloudflared-named.pid
+  sleep 8
+
+  if ! kill -0 "$(cat logs/cloudflared-named.pid)" 2>/dev/null; then
+    echo "!! tunnel exited -- last lines of logs/cf-named.log:"
+    tail -20 logs/cf-named.log
+    exit 1
+  fi
+
+  echo
+  echo "==========================================================="
+  echo "  SMP (stable -- give this to players, it will not change):"
+  echo
+  echo "      wss://$HOSTNAME_ARG"
+  echo
+  echo "  Eaglercraft -> Multiplayer -> Direct Connect. No port number."
+  echo "  DNS may take a minute to propagate on first run."
+  echo "==========================================================="
+  echo "  Stop with:  bash cloudflare.sh stop"
+  exit 0
+fi
 
 SMP_URL=""; WEB_URL=""
 if [ "$MODE" = "both" ] || [ "$MODE" = "smp" ]; then
