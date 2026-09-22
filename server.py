@@ -211,6 +211,24 @@ GZIP_TYPES = (".html", ".css", ".js", ".mjs", ".json", ".svg", ".txt", ".xml", "
 GZIP_MAX_BYTES = 1_000_000
 
 
+_STATIC_REF_RE = re.compile(rb'(?P<url>/static/[A-Za-z0-9_.\-]+\.(?:js|css))(?P<q>["\'?])')
+
+
+def version_static_refs(body):
+    """Append ?v=<mtime> to /static/*.js|css references inside an HTML body."""
+    def sub(m):
+        url = m.group("url")
+        if m.group("q") == b"?":          # already versioned
+            return m.group(0)
+        try:
+            st = os.stat(os.path.join(WEB, url.decode("ascii").lstrip("/")))
+        except OSError:
+            return m.group(0)
+        return b"%s?v=%x%s" % (url, int(st.st_mtime), m.group("q"))
+
+    return _STATIC_REF_RE.sub(sub, body)
+
+
 def cache_headers_for(full):
     """(cache_control, etag, last_modified) for a file inside web/."""
     st = os.stat(full)
@@ -483,6 +501,33 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         accepts_gzip = "gzip" in (self.headers.get("Accept-Encoding") or "").lower()
         do_gzip = accepts_gzip and ext in GZIP_TYPES and size <= GZIP_MAX_BYTES
+
+        # HTML gets its /static/ references versioned on the way out. Only
+        # small pages: the 18 MB game client is not one of ours to rewrite.
+        if ext == ".html" and size <= GZIP_MAX_BYTES:
+            with open(full, "rb") as f:
+                body = version_static_refs(f.read())
+            # hashlib, not hash(): Python randomises hash() per process, so
+            # the ETag would change on every restart and never match.
+            etag = '"%s-h"' % hashlib.sha1(body).hexdigest()[:16]
+            if self._client_has_current(etag, lastmod):
+                return self._not_modified(cc, etag, lastmod)
+            headers = [("Content-Type", ctype), ("Cache-Control", cc),
+                       ("ETag", etag), ("Last-Modified", lastmod)]
+            if accepts_gzip:
+                body = gzip.compress(body, 6)
+                headers += [("Content-Encoding", "gzip"), ("Vary", "Accept-Encoding")]
+            self.send_response(200)
+            for k, v in headers:
+                self.send_header(k, v)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            if self.command != "HEAD":
+                try:
+                    self.wfile.write(body)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+            return
 
         if do_gzip:
             with open(full, "rb") as f:
