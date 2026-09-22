@@ -14,10 +14,9 @@ let ME = null;
   loadSmp();
 })();
 
-// ---- about:blank launcher (shared) ---------------------------------------
-// EagleCraft launch helper (uses the shared launchBlank from /static/launch.js).
+// ---- launcher ------------------------------------------------------------
 function launchEagler() {
-  return launchBlank(location.origin + '/eaglercraft/index.html', 'EagleCraft');
+  return openApp('/eaglercraft/index.html');
 }
 
 // ---- worlds + storage ----------------------------------------------------

@@ -53,7 +53,7 @@
   <div class="pct" id="pct">0%</div>
   <div class="stat" id="stat">starting…</div>
 
-  <button class="enter" id="enter" onclick="launchApp()">🚀 Launch into about:blank</button>
+  <button class="enter" id="enter" onclick="launchApp()">🚀 Open EagleCraft</button>
   <div class="note" id="note"></div>
 </div>
 
@@ -112,15 +112,13 @@ async function preload() {
 
   setPct(100); setStat('saved to your browser ✓');
   document.getElementById('title').textContent = 'Loaded!';
-  document.getElementById('sub').textContent = 'Everything is in your browser. Open it in a clean window:';
+  document.getElementById('sub').textContent = 'Everything is saved in your browser. Ready to go:';
   enterBtn.style.display = 'inline-block';
-  note('Allow pop-ups if your browser asks.');
+  note('');
 }
 
-// Exactly the EagleCraft about:blank logic (from /static/launch.js): open an
-// about:blank window and load the app inside it.
 function launchApp() {
-  launchBlank(location.origin + '/chooser', 'EagleCraft');
+  openApp('/chooser');
 }
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});

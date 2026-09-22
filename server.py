@@ -196,7 +196,12 @@ USERNAME_RE = re.compile(r"^[A-Za-z0-9_]{3,20}$")
 # Content that never changes under a given name: the game client, the game
 # collections, and the site's own css/js. A week of browser cache turns the
 # second visit into zero bytes instead of 18 MB.
-IMMUTABLE_PREFIXES = ("eaglercraft/", "games/", "moregames/", "static/")
+# NOTE: static/ is deliberately NOT here. The game client and the game
+# collections never change under a given filename, but the site's own css/js
+# does every time we edit it -- caching those for a week means a fix is
+# invisible to anyone who already visited. They get no-cache instead, which
+# costs one 304 and always serves the current version.
+IMMUTABLE_PREFIXES = ("eaglercraft/", "games/", "moregames/")
 IMMUTABLE_MAX_AGE = 604800          # 7 days
 
 # Worth gzipping on the fly. Binary media is already compressed, and the

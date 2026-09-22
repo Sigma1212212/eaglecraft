@@ -163,8 +163,7 @@ document.querySelectorAll('[data-tilt]').forEach(card => {
     card.style.transform = `rotateY(${px*12}deg) rotateX(${-py*12}deg) translateY(-4px)`;
   });
   card.addEventListener('mouseleave', () => { card.style.transform = ''; });
-  // click ripple, then go to the chosen section. We're already inside the
-  // about:blank window, so navigating here keeps everything cloaked.
+  // click ripple, then go to the chosen section.
   card.addEventListener('click', e => {
     const href = card.getAttribute('href');
     e.preventDefault();

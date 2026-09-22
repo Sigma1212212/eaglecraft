@@ -24,12 +24,10 @@
 <div class="launch">
   <div class="cube">🟩</div>
   <h1>EagleCraft</h1>
-  <p>Click to launch the game in a clean window. (Allow pop-ups the first time —
-     this is what makes it run properly instead of a black screen.)</p>
+  <p>Click to start playing.</p>
   <button class="btn big" onclick="launchGame()">▶ Launch EagleCraft</button>
   <div class="row" style="margin-top:6px">
     <a class="btn gray small" href="/dashboard">← Dashboard</a>
-    <button class="btn gray small" onclick="launchHere()">Open in this tab instead</button>
   </div>
   <p id="msg" class="msg"></p>
 </div>
@@ -40,14 +38,10 @@ const CLIENT = location.origin + '/eaglercraft/index.html';
 
 function launchGame() {
   const msg = document.getElementById('msg');
-  const ok = launchBlank(CLIENT, 'EagleCraft');
-  if (ok !== false) { /* launchBlank returns false on success path too */ }
   msg.className = 'msg ok';
-  msg.textContent = 'Launching in a new window — if nothing opened, allow pop-ups.';
+  msg.textContent = 'Loading the game…';
+  openApp(CLIENT);
 }
-
-// Fallback: replace this tab with the client as a top-level page.
-function launchHere() { location.href = CLIENT; }
 </script>
 </body>
 </html>
