@@ -38,6 +38,8 @@ import signal
 import threading
 from collections import deque
 import posixpath
+import gzip
+from email.utils import formatdate, parsedate_to_datetime
 from urllib.parse import urlparse, parse_qs, unquote
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -191,6 +193,35 @@ def read_session(token):
 
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_]{3,20}$")
 
+# Content that never changes under a given name: the game client, the game
+# collections, and the site's own css/js. A week of browser cache turns the
+# second visit into zero bytes instead of 18 MB.
+IMMUTABLE_PREFIXES = ("eaglercraft/", "games/", "moregames/", "static/")
+IMMUTABLE_MAX_AGE = 604800          # 7 days
+
+# Worth gzipping on the fly. Binary media is already compressed, and the
+# 18 MB client is left to Cloudflare's brotli rather than burning host CPU
+# re-compressing it on every request.
+GZIP_TYPES = (".html", ".css", ".js", ".mjs", ".json", ".svg", ".txt", ".xml", ".map")
+GZIP_MAX_BYTES = 1_000_000
+
+
+def cache_headers_for(full):
+    """(cache_control, etag, last_modified) for a file inside web/."""
+    st = os.stat(full)
+    try:
+        rel = os.path.relpath(full, WEB).replace("\\", "/")
+    except ValueError:
+        rel = ""
+    if rel.startswith(IMMUTABLE_PREFIXES):
+        cc = f"public, max-age={IMMUTABLE_MAX_AGE}"
+    else:
+        # Pages change when we edit them: allow caching but force a
+        # revalidation, which costs one cheap 304 instead of a full body.
+        cc = "public, no-cache"
+    etag = '"%x-%x"' % (st.st_size, int(st.st_mtime))
+    return cc, etag, formatdate(st.st_mtime, usegmt=True)
+
 
 def resolve_web_path(url_path):
     """Map a URL path to a file inside web/, or None if it escapes.
@@ -223,6 +254,9 @@ def resolve_web_path(url_path):
 # --------------------------------------------------------------------------- #
 class Handler(http.server.BaseHTTPRequestHandler):
     server_version = "EagleCraft/1.0"
+    # Keep-alive. Every response below sets an accurate Content-Length (or is
+    # a bodyless 204/304), which HTTP/1.1 requires for connection reuse.
+    protocol_version = "HTTP/1.1"
 
     # ---- low level helpers ------------------------------------------------ #
     def _set_nodelay(self):
@@ -298,6 +332,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         # HEAD is used by /play to detect whether the client is installed.
         if path.startswith("/api/"):
             self.send_response(405)
+            self.send_header("Content-Length", "0")
             self.end_headers()
             return
         routes = {"/": "loader.html", "/chooser": "welcome.html",
@@ -309,16 +344,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
             full = resolve_web_path(path)
             if full is None:
                 self.send_response(403)
+                self.send_header("Content-Length", "0")
                 self.end_headers()
                 return
         if os.path.isfile(full):
             ext = os.path.splitext(full)[1].lower()
+            cc, etag, lastmod = cache_headers_for(full)
             self.send_response(200)
             self.send_header("Content-Type", self.CONTENT_TYPES.get(ext, "application/octet-stream"))
             self.send_header("Content-Length", str(os.path.getsize(full)))
+            self.send_header("Cache-Control", cc)
+            self.send_header("ETag", etag)
+            self.send_header("Last-Modified", lastmod)
+            self.send_header("Accept-Ranges", "bytes")
             self.end_headers()
         else:
             self.send_response(404)
+            self.send_header("Content-Length", "0")
             self.end_headers()
 
     def do_POST(self):
@@ -340,11 +382,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path in ("/games", "/games/"):
             self.send_response(302)
             self.send_header("Location", "/games/Gams.html")
+            self.send_header("Content-Length", "0")
             self.end_headers()
             return
         if path in ("/moregames", "/moregames/"):
             self.send_response(302)
             self.send_header("Location", "/moregames/index.html")
+            self.send_header("Content-Length", "0")
             self.end_headers()
             return
         routes = {
@@ -396,18 +440,113 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ".br": "application/octet-stream", ".gz": "application/octet-stream",
     }
 
+    def _not_modified(self, cc, etag, lastmod):
+        self.send_response(304)
+        self.send_header("ETag", etag)
+        self.send_header("Cache-Control", cc)
+        self.send_header("Last-Modified", lastmod)
+        self.end_headers()   # 304 carries no body by definition
+
+    def _client_has_current(self, etag, lastmod):
+        """True when the browser already holds this exact version."""
+        inm = self.headers.get("If-None-Match")
+        if inm:
+            # May be a comma-separated list, and may be weak-prefixed.
+            for candidate in inm.split(","):
+                if candidate.strip().lstrip("W/").strip() == etag:
+                    return True
+            return False
+        ims = self.headers.get("If-Modified-Since")
+        if ims:
+            try:
+                return parsedate_to_datetime(ims) >= parsedate_to_datetime(lastmod)
+            except (TypeError, ValueError):
+                return False
+        return False
+
     def _send_file(self, full):
         if not os.path.isfile(full):
             return self._err("not found", 404)
         ext = os.path.splitext(full)[1].lower()
         ctype = self.CONTENT_TYPES.get(ext, "application/octet-stream")
         size = os.path.getsize(full)
-        self.send_response(200)
+        cc, etag, lastmod = cache_headers_for(full)
+
+        # Cheapest possible response: the client already has this version.
+        if self._client_has_current(etag, lastmod):
+            return self._not_modified(cc, etag, lastmod)
+
+        accepts_gzip = "gzip" in (self.headers.get("Accept-Encoding") or "").lower()
+        do_gzip = accepts_gzip and ext in GZIP_TYPES and size <= GZIP_MAX_BYTES
+
+        if do_gzip:
+            with open(full, "rb") as f:
+                body = gzip.compress(f.read(), 6)
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Encoding", "gzip")
+            self.send_header("Vary", "Accept-Encoding")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", cc)
+            self.send_header("ETag", etag[:-1] + '-gz"')
+            self.send_header("Last-Modified", lastmod)
+            self.end_headers()
+            try:
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            return
+
+        # Range support: an interrupted 18 MB download resumes instead of
+        # starting over, and it lets Cloudflare fetch in parts.
+        start, end = 0, size - 1
+        partial = False
+        rng = self.headers.get("Range")
+        if rng and rng.startswith("bytes=") and size:
+            spec = rng[6:].split(",")[0].strip()
+            try:
+                a, _, b = spec.partition("-")
+                if a == "":                       # suffix range: last N bytes
+                    start, end = max(0, size - int(b)), size - 1
+                else:
+                    start = int(a)
+                    end = int(b) if b else size - 1
+                if start > end or start >= size:
+                    raise ValueError
+                end = min(end, size - 1)
+                partial = True
+            except ValueError:
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{size}")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+
+        length = end - start + 1
+        self.send_response(206 if partial else 200)
         self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(size))
+        self.send_header("Content-Length", str(length))
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Cache-Control", cc)
+        self.send_header("ETag", etag)
+        self.send_header("Last-Modified", lastmod)
+        if partial:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
         self.end_headers()
-        with open(full, "rb") as f:
-            shutil.copyfileobj(f, self.wfile)
+        if self.command == "HEAD":
+            return
+        try:
+            with open(full, "rb") as f:
+                f.seek(start)
+                remaining = length
+                while remaining > 0:
+                    chunk = f.read(min(262144, remaining))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     # ---- API GET ---------------------------------------------------------- #
     def api_get(self, path, query):
